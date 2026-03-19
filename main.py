@@ -3,6 +3,8 @@ import asyncio
 import feedparser
 import json
 import os
+from aiohttp import web
+from concurrent.futures import ThreadPoolExecutor
 
 TOKEN = "MTQ4NDE3NTI4MTE3NzYyODgwNQ.G7TOGs.I7QQTtd8CpwLRqqmB13NgDZubr3jzW4OGYU2mg"
 
@@ -25,18 +27,40 @@ feeds = {
 }
 
 client = discord.Client(intents=discord.Intents.default())
+executor = ThreadPoolExecutor()
+
+# Basit web server (Replit uyumlu, uptime robot ile 7/24)
+async def ping(request):
+    return web.Response(text="Bot alive!")
+
+app = web.Application()
+app.router.add_get("/", ping)
+
+# Web serveri async olarak çalıştır
+async def start_web_server():
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+# Feed çekme fonksiyonu (thread ile)
+def fetch_feed(url):
+    return feedparser.parse(url)
 
 @client.event
 async def on_ready():
     print(f"Giriş yapıldı: {client.user}")
+    # Web server başlat
+    asyncio.create_task(start_web_server())
 
     while True:
         for name, (url, channel_id) in feeds.items():
             try:
-                feed = feedparser.parse(url)
+                # feedparser’i thread içinde çalıştır
+                feed = await asyncio.get_event_loop().run_in_executor(executor, fetch_feed, url)
                 if feed.entries:
                     post = feed.entries[0]
-                    # Eğer bu post daha önce gönderilmediyse
                     if last_posts.get(name) != post.link:
                         last_posts[name] = post.link
                         # JSON dosyasını güncelle
@@ -45,14 +69,14 @@ async def on_ready():
 
                         channel = client.get_channel(channel_id)
 
-                        # Embed oluştur
                         embed = discord.Embed(
                             title=post.title,
                             url=post.link,
                             description=(post.summary if hasattr(post, 'summary') else ''),
-                            color=0xff4500
+                            color=0xff5700  # Mee6 turuncu tonu
                         )
 
+                        # Resim ekleme
                         media_content = None
                         if 'media_content' in post:
                             media_content = post.media_content[0]['url']
@@ -61,6 +85,8 @@ async def on_ready():
 
                         if media_content:
                             embed.set_image(url=media_content)
+                        else:
+                            embed.set_image(url="https://i.imgur.com/rdm3W9t.png")  # fallback resim
 
                         embed.set_footer(text=f"r/{name} • Reddit")
 
