@@ -4,20 +4,31 @@ import feedparser
 import json
 import os
 import html
+import re  # HTML etiketlerini temizlemek için eklendi
 from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor
 
-# Ortam Değişkenleri
+# --- HTML TEMİZLEME FONKSİYONU ---
+def clean_html(raw_html):
+    """HTML etiketlerini siler ve sadece metni bırakır."""
+    if not raw_html:
+        return ""
+    # 1. HTML etiketlerini (<...>) temizle
+    cleanr = re.compile('<.*?>')
+    cleantext = re.sub(cleanr, '', raw_html)
+    # 2. Fazla boşlukları temizle
+    cleantext = " ".join(cleantext.split())
+    return cleantext
+
+# (Diğer ayarlar aynı kalıyor...)
 TOKEN = os.environ["DISCORD_TOKEN"]
 
-# last_posts.json kontrolü
 if os.path.exists("last_posts.json"):
     with open("last_posts.json", "r") as f:
         last_posts = json.load(f)
 else:
     last_posts = {}
 
-# Subreddit ve Kanal Eşleşmeleri
 feeds = {
     "reddit": ("https://www.reddit.com/r/reddit/.rss", int(os.environ["CHANNEL_REDDIT"])),
     "modnews": ("https://www.reddit.com/r/modnews/.rss", int(os.environ["CHANNEL_MODNEWS"])),
@@ -31,9 +42,8 @@ feeds = {
 client = discord.Client(intents=discord.Intents.default())
 executor = ThreadPoolExecutor()
 
-# --- WEB SERVER (REPLIT UYANIK TUTMA) ---
 async def ping(request):
-    return web.Response(text="Bot uyanık! 2026 Sistemi Aktif.")
+    return web.Response(text="Bot is alive!")
 
 async def start_web_server():
     app = web.Application()
@@ -43,9 +53,7 @@ async def start_web_server():
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"Web sunucusu {port} portunda başlatıldı.")
 
-# --- FEED İŞLEMLERİ ---
 def fetch_feed(url):
     return feedparser.parse(url)
 
@@ -63,12 +71,16 @@ async def check_feeds():
                             json.dump(last_posts, f)
 
                         channel = client.get_channel(channel_id)
-                        if channel is None:
-                            continue
+                        if channel is None: continue
 
-                        description = html.unescape(post.summary if hasattr(post, 'summary') else '')
+                        # --- DÜZELTİLEN KISIM BURASI ---
+                        raw_summary = post.summary if hasattr(post, 'summary') else ''
+                        # Önce HTML'i temizliyoruz, sonra karakterleri düzeltiyoruz
+                        description = html.unescape(clean_html(raw_summary))
+                        
                         if len(description) > 4000:
-                            description = description[:4000] + "\n...[Devamı Reddit'te]"
+                            description = description[:4000] + "\n..."
+                        # ------------------------------
 
                         embed = discord.Embed(
                             title=post.title,
@@ -98,13 +110,9 @@ async def check_feeds():
 async def on_ready():
     print(f"Giriş yapıldı: {client.user}")
 
-# --- ANA ÇALIŞTIRICI ---
 async def main():
-    # 1. Web Sunucusunu Başlat
     await start_web_server()
-    # 2. Feed Kontrol Döngüsünü Arka Planda Başlat
     asyncio.create_task(check_feeds())
-    # 3. Botu Başlat
     async with client:
         await client.start(TOKEN)
 
