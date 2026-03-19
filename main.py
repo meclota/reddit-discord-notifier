@@ -1,64 +1,61 @@
 import discord
-from discord.ext import commands, tasks
-import feedparser
-import os
+import praw
 import asyncio
 
-# Environment variables (Railway'de ekleyeceğiz)
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))  # Kanal ID'si (Discord'da sağ tık → Copy Channel ID)
-RSS_URLS_STR = os.getenv("RSS_URLS", "")  # virgülle ayrılmış RSS linkleri
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 300))  # saniye, varsayılan 5 dk
+TOKEN = "DISCORD_BOT_TOKEN"
 
-intents = discord.Intents.default()
-bot = commands.Bot(command_prefix="!", intents=intents)
+reddit = praw.Reddit(
+    client_id="CLIENT_ID",
+    client_secret="CLIENT_SECRET",
+    user_agent="discord bot"
+)
 
-seen_per_feed = {}  # Her feed için seen set'ler
+# 🔥 BURASI EN ÖNEMLİ YER
+# subreddit : kanal ID
+subreddit_channels = {
+    "reddit": 1135383164760633384,
+    "modnews": 1141367532016635925,
+    "place": 1135383103079202857,
+    "worldnews": 1135547594525900911,
+    "technews": 1141383045975388230,
+    "EarthPorn": 1141377660711358554,
+    "tifu": 1141386857897279499
+}
 
-@bot.event
+client = discord.Client(intents=discord.Intents.default())
+
+last_posts = {}
+
+@client.event
 async def on_ready():
-    print(f'Bot hazır! {bot.user} olarak giriş yapıldı.')
-    for url in rss_urls:
-        seen_per_feed[url] = set()
-    check_feeds.start()  # Loop'u başlat
+    print(f"Bot giriş yaptı: {client.user}")
 
-rss_urls = [url.strip() for url in RSS_URLS_STR.split(",") if url.strip()]
+    while True:
+        for sub_name, channel_id in subreddit_channels.items():
+            try:
+                subreddit = reddit.subreddit(sub_name)
 
-@tasks.loop(seconds=CHECK_INTERVAL)
-async def check_feeds():
-    channel = bot.get_channel(CHANNEL_ID)
-    if not channel:
-        print("Kanal bulunamadı! CHANNEL_ID'yi kontrol et.")
-        return
+                for post in subreddit.new(limit=1):
+                    if last_posts.get(sub_name) != post.id:
+                        last_posts[sub_name] = post.id
 
-    for rss_url in rss_urls:
-        try:
-            feed = feedparser.parse(rss_url)
-            if 'entries' not in feed or not feed.entries:
-                continue
+                        channel = client.get_channel(channel_id)
 
-            subreddit_name = rss_url.split("/r/")[1].split("/")[0] if "/r/" in rss_url else "Bilinmeyen"
+                        embed = discord.Embed(
+                            title=post.title,
+                            url=post.url,
+                            description=f"📌 r/{sub_name}",
+                            color=0xff4500
+                        )
 
-            for entry in reversed(feed.entries):
-                entry_id = entry.get('id') or entry.link or entry.title
-                if entry_id not in seen_per_feed.get(rss_url, set()):
-                    summary = entry.get('summary') or ''
-                    embed = discord.Embed(
-                        title=entry.title,
-                        url=entry.link,
-                        description=summary[:800] + "..." if len(summary) > 800 else summary,
-                        color=0xFF4500  # Reddit turuncu
-                    )
-                    embed.set_footer(text=f"r/{subreddit_name}")
-                    await channel.send(embed=embed)
-                    seen_per_feed[rss_url].add(entry_id)
-                    await asyncio.sleep(5)  # Her mesaj arası 5 sn bekle (rate limit güvenli)
-        except Exception as e:
-            print(f"Feed hatası ({rss_url}): {e}")
+                        if post.thumbnail and post.thumbnail.startswith("http"):
+                            embed.set_image(url=post.thumbnail)
 
-@check_feeds.before_loop
-async def before_check():
-    await bot.wait_until_ready()
-    print("Feed kontrol loop'u başladı.")
+                        await channel.send(embed=embed)
 
-bot.run(TOKEN)
+            except Exception as e:
+                print(f"Hata ({sub_name}):", e)
+
+        await asyncio.sleep(60)
+
+client.run(TOKEN)
