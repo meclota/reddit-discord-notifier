@@ -5,6 +5,7 @@ import json
 import os
 from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor
+import html  # HTML entity decode için
 
 TOKEN = "MTQ4NDE3NTI4MTE3NzYyODgwNQ.G7TOGs.I7QQTtd8CpwLRqqmB13NgDZubr3jzW4OGYU2mg"
 
@@ -69,14 +70,17 @@ async def on_ready():
 
                         channel = client.get_channel(channel_id)
 
+                        # HTML entity decode
+                        description = html.unescape(post.summary if hasattr(post, 'summary') else '')
+
                         embed = discord.Embed(
                             title=post.title,
                             url=post.link,
-                            description=(post.summary if hasattr(post, 'summary') else ''),
+                            description=description,
                             color=0xff5700  # Mee6 turuncu tonu
                         )
 
-                        # Resim ekleme
+                        # Resim ekleme (sadece varsa)
                         media_content = None
                         if 'media_content' in post:
                             media_content = post.media_content[0]['url']
@@ -85,8 +89,6 @@ async def on_ready():
 
                         if media_content:
                             embed.set_image(url=media_content)
-                        else:
-                            embed.set_image(url="https://i.imgur.com/rdm3W9t.png")  # fallback resim
 
                         embed.set_footer(text=f"r/{name} • Reddit")
 
