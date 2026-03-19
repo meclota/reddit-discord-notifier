@@ -18,13 +18,13 @@ else:
 
 # subreddit : kanal ID
 feeds = {
-    "reddit": ("https://www.reddit.com/r/reddit/.rss", 1135383164760633384),
-    "modnews": ("https://www.reddit.com/r/modnews/.rss", 1141367532016635925),
-    "place": ("https://www.reddit.com/r/place/.rss", 1135383103079202857),
-    "worldnews": ("https://www.reddit.com/r/worldnews/.rss", 1135547594525900911),
-    "technews": ("https://www.reddit.com/r/technews/.rss", 1141383045975388230),
-    "EarthPorn": ("https://www.reddit.com/r/EarthPorn/.rss", 1141377660711358554),
-    "tifu": ("https://www.reddit.com/r/tifu/.rss", 1141386857897279499),
+    "reddit": ("https://www.reddit.com/r/reddit/.rss", int(os.environ["CHANNEL_REDDIT"])),
+    "modnews": ("https://www.reddit.com/r/modnews/.rss", int(os.environ["CHANNEL_MODNEWS"])),
+    "place": ("https://www.reddit.com/r/place/.rss", int(os.environ["CHANNEL_PLACE"])),
+    "worldnews": ("https://www.reddit.com/r/worldnews/.rss", int(os.environ["CHANNEL_WORLDNEWS"])),
+    "technews": ("https://www.reddit.com/r/technews/.rss", int(os.environ["TECH_NEWS"])),
+    "EarthPorn": ("https://www.reddit.com/r/EarthPorn/.rss", int(os.environ["EARTH_NATURES"])),
+    "tifu": ("https://www.reddit.com/r/tifu/.rss", int(os.environ["TIFU"])),
 }
 
 client = discord.Client(intents=discord.Intents.default())
