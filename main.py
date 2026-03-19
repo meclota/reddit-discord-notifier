@@ -56,19 +56,18 @@ async def on_message(message):
     # 1. BASİT TEST KOMUTU
     if message.content == "!test":
         embed = discord.Embed(
-            description=f"✨ **Bot is up*\n\n📡 Latency: `{round(client.latency * 1000)}ms`",
+            description=f"✨ **Bot is up**\n\n📡 Latency: `{round(client.latency * 1000)}ms`",
             color=0x2b2d31
         )
         await message.channel.send(embed=embed)
 
-    # 2. ÖZEL LİNK PAYLAŞMA KOMUTU (!paylas [reddit_linki])
+    # 2. ÖZEL LİNK PAYLAŞMA KOMUTU (!send [reddit_linki])
     if message.content.startswith("!send"):
         parts = message.content.split(" ")
         if len(parts) < 2:
             return await message.channel.send("Please add a reddit link! Example: `!send https://reddit.com/...` ")
         
         test_url = parts[1]
-        # Reddit linkini RSS formatına çeviriyoruz (.rss ekleyerek)
         if not test_url.endswith(".rss"):
             rss_url = test_url.split("?")[0].rstrip("/") + ".rss"
         else:
@@ -103,10 +102,13 @@ async def on_message(message):
             else:
                 await message.channel.send("Link is incorrect, make sure the link is correct.")
         except Exception as e:
-            await message.channel.send(f"Hata oluştu: {e}")
+            await message.channel.send(f"Error occurred: {e}")
 
 async def check_feeds():
     await client.wait_until_ready()
+    # Botun uyanık görünmesi için aktivite ekleyelim
+    await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Reddit RSS"))
+    
     while not client.is_closed():
         for name, (url, channel_id) in feeds.items():
             try:
