@@ -1,8 +1,17 @@
 import discord
 import asyncio
 import feedparser
+import json
+import os
 
 TOKEN = "MTQ4NDE3NTI4MTE3NzYyODgwNQ.G7TOGs.I7QQTtd8CpwLRqqmB13NgDZubr3jzW4OGYU2mg"
+
+# last_posts.json varsa yükle, yoksa boş dict oluştur
+if os.path.exists("last_posts.json"):
+    with open("last_posts.json", "r") as f:
+        last_posts = json.load(f)
+else:
+    last_posts = {}
 
 # subreddit : kanal ID
 feeds = {
@@ -16,7 +25,6 @@ feeds = {
 }
 
 client = discord.Client(intents=discord.Intents.default())
-last_posts = {}
 
 @client.event
 async def on_ready():
@@ -28,11 +36,16 @@ async def on_ready():
                 feed = feedparser.parse(url)
                 if feed.entries:
                     post = feed.entries[0]
+                    # Eğer bu post daha önce gönderilmediyse
                     if last_posts.get(name) != post.link:
                         last_posts[name] = post.link
+                        # JSON dosyasını güncelle
+                        with open("last_posts.json", "w") as f:
+                            json.dump(last_posts, f)
+
                         channel = client.get_channel(channel_id)
 
-                        # Embed oluşturuyoruz
+                        # Embed oluştur
                         embed = discord.Embed(
                             title=post.title,
                             url=post.link,
@@ -40,7 +53,6 @@ async def on_ready():
                             color=0xff4500
                         )
 
-                        # Eğer resim varsa embed'e ekle
                         media_content = None
                         if 'media_content' in post:
                             media_content = post.media_content[0]['url']
@@ -52,7 +64,10 @@ async def on_ready():
 
                         embed.set_footer(text=f"r/{name} • Reddit")
 
-                        await channel.send(embed=embed)
+                        if channel is not None:
+                            await channel.send(embed=embed)
+                        else:
+                            print(f"Kanal bulunamadı: {channel_id}")
 
             except Exception as e:
                 print(f"Hata ({name}): {e}")
