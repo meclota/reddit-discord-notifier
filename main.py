@@ -2,7 +2,7 @@ import discord
 import asyncio
 import feedparser
 
-TOKEN = "DISCORD_BOT_TOKEN"
+TOKEN = "MTQ4NDE3NTI4MTE3NzYyODgwNQ.G7TOGs.I7QQTtd8CpwLRqqmB13NgDZubr3jzW4OGYU2mg"
 
 # subreddit : kanal ID
 feeds = {
