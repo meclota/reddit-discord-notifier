@@ -7,7 +7,7 @@ from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor
 import html  # HTML entity decode için
 
-TOKEN = "MTQ4NDE3NTI4MTE3NzYyODgwNQ.G7TOGs.I7QQTtd8CpwLRqqmB13NgDZubr3jzW4OGYU2mg"
+TOKEN = os.environ["DISCORD_TOKEN"]
 
 # last_posts.json varsa yükle, yoksa boş dict oluştur
 if os.path.exists("last_posts.json"):
