@@ -4,23 +4,10 @@ import feedparser
 import json
 import os
 import html
-import re  # HTML etiketlerini temizlemek için eklendi
+import re
 from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor
 
-# --- HTML TEMİZLEME FONKSİYONU ---
-def clean_html(raw_html):
-    """HTML etiketlerini siler ve sadece metni bırakır."""
-    if not raw_html:
-        return ""
-    # 1. HTML etiketlerini (<...>) temizle
-    cleanr = re.compile('<.*?>')
-    cleantext = re.sub(cleanr, '', raw_html)
-    # 2. Fazla boşlukları temizle
-    cleantext = " ".join(cleantext.split())
-    return cleantext
-
-# (Diğer ayarlar aynı kalıyor...)
 TOKEN = os.environ["DISCORD_TOKEN"]
 
 if os.path.exists("last_posts.json"):
@@ -39,11 +26,23 @@ feeds = {
     "tifu": ("https://www.reddit.com/r/tifu/.rss", int(os.environ["TIFU"])),
 }
 
-client = discord.Client(intents=discord.Intents.default())
+# Mesaj içeriği okuma izni (Intent) ekleyelim
+intents = discord.Intents.default()
+intents.message_content = True 
+client = discord.Client(intents=intents)
 executor = ThreadPoolExecutor()
 
+def clean_html(raw_html):
+    if not raw_html: return ""
+    # Tablo ve link içeren karmaşık yapıları temizle
+    cleanr = re.compile('<.*?>')
+    cleantext = re.sub(cleanr, '', raw_html)
+    # Reddit'in "submitted by", "link", "comments" gibi otomatik yazılarını temizle
+    cleantext = cleantext.split("submitted by")[0].strip()
+    return html.unescape(cleantext)
+
 async def ping(request):
-    return web.Response(text="Bot is alive!")
+    return web.Response(text="Bot is Alive!")
 
 async def start_web_server():
     app = web.Application()
@@ -54,15 +53,19 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-def fetch_feed(url):
-    return feedparser.parse(url)
+@client.event
+async def on_message(message):
+    if message.author == client.user: return
+    
+    if message.content == "!test":
+        await message.channel.send(f"✅ Bot Is Alive! Latency: {round(client.latency * 1000)}ms")
 
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
         for name, (url, channel_id) in feeds.items():
             try:
-                feed = await asyncio.get_event_loop().run_in_executor(executor, fetch_feed, url)
+                feed = await asyncio.get_event_loop().run_in_executor(executor, feedparser.parse, url)
                 if feed.entries:
                     post = feed.entries[0]
                     if last_posts.get(name) != post.link:
@@ -71,44 +74,35 @@ async def check_feeds():
                             json.dump(last_posts, f)
 
                         channel = client.get_channel(channel_id)
-                        if channel is None: continue
-
-                        # --- DÜZELTİLEN KISIM BURASI ---
-                        raw_summary = post.summary if hasattr(post, 'summary') else ''
-                        # Önce HTML'i temizliyoruz, sonra karakterleri düzeltiyoruz
-                        description = html.unescape(clean_html(raw_summary))
-                        
-                        if len(description) > 4000:
-                            description = description[:4000] + "\n..."
-                        # ------------------------------
-
-                        embed = discord.Embed(
-                            title=post.title,
-                            url=post.link,
-                            description=description,
-                            color=0xff5700
-                        )
-
-                        media_content = None
-                        if 'media_content' in post:
-                            media_content = post.media_content[0]['url']
-                        elif 'media_thumbnail' in post:
-                            media_content = post.media_thumbnail[0]['url']
-
-                        if media_content:
-                            embed.set_image(url=media_content)
-
-                        embed.set_footer(text=f"r/{name} • Reddit")
-                        await channel.send(embed=embed)
-
+                        if channel:
+                            # Yazıyı temizle ve başlığı 256 karakterle sınırla
+                            clean_desc = clean_html(post.summary if hasattr(post, 'summary') else '')
+                            
+                            embed = discord.Embed(
+                                title=post.title[:250],
+                                url=post.link,
+                                description=clean_desc[:4000],
+                                color=0xff5700 # Reddit Turuncusu
+                            )
+                            
+                            # Resim çekme mantığı
+                            img_url = None
+                            if 'media_content' in post:
+                                img_url = post.media_content[0]['url']
+                            elif 'media_thumbnail' in post:
+                                img_url = post.media_thumbnail[0]['url']
+                            
+                            if img_url: embed.set_image(url=img_url)
+                            embed.set_footer(text=f"📍 r/{name} • 2026 Otomasyon")
+                            
+                            await channel.send(embed=embed)
             except Exception as e:
                 print(f"Hata ({name}): {e}")
-        
         await asyncio.sleep(60)
 
 @client.event
 async def on_ready():
-    print(f"Giriş yapıldı: {client.user}")
+    print(f"{client.user} is successfully logged in!")
 
 async def main():
     await start_web_server()
@@ -117,7 +111,4 @@ async def main():
         await client.start(TOKEN)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    asyncio.run(main())
