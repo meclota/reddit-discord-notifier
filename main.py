@@ -1,5 +1,5 @@
 import discord
-from discord import app_commands # Liste için bu kütüphane şart
+from discord import app_commands
 import asyncio
 import feedparser
 import json
@@ -17,6 +17,7 @@ if os.path.exists("last_posts.json"):
 else:
     last_posts = {}
 
+# Channel IDs (os.environ ile Secrets'tan çeker, istersen buraya direkt sayı yazabilirsin)
 feeds = {
     "reddit": ("https://www.reddit.com/r/reddit/.rss", int(os.environ["CHANNEL_REDDIT"])),
     "modnews": ("https://www.reddit.com/r/modnews/.rss", int(os.environ["CHANNEL_MODNEWS"])),
@@ -27,17 +28,23 @@ feeds = {
     "tifu": ("https://www.reddit.com/r/tifu/.rss", int(os.environ["TIFU"])),
 }
 
-# --- YENİ YAPI ---
 class MyBot(discord.Client):
     def __init__(self):
+        # Intents: Slash komutları ve mesaj içerikleri için gerekli yetkiler
         intents = discord.Intents.default()
         intents.message_content = True 
         super().__init__(intents=intents)
+        # CommandTree: Slash komutlarını yöneten ağaç yapısı
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        # Bu satır komutları Discord'un o listesine (/) kaydeder
-        await self.tree.sync()
+        # Komutları global olarak Discord'a kaydeder (Sync)
+        print("Syncing slash commands...")
+        try:
+            synced = await self.tree.sync()
+            print(f"Synced {len(synced)} command(s) successfully.")
+        except Exception as e:
+            print(f"Failed to sync commands: {e}")
 
 client = MyBot()
 executor = ThreadPoolExecutor()
@@ -48,20 +55,20 @@ def clean_html(raw_html):
     cleantext = re.split(r'submitted by|\[link\]|\[comments\]', cleantext)[0].strip()
     return html.unescape(cleantext)
 
-# --- SLASH KOMUTLARI (LİSTEDE GÖRÜNENLER) ---
+# --- SLASH COMMANDS ---
 
-@client.tree.command(name="test", description="Check bot status")
+@client.tree.command(name="test", description="Check if the bot is alive")
 async def test(interaction: discord.Interaction):
     embed = discord.Embed(
-        description=f"✨ **Bot is up**\n\n📡 Latency: `{round(client.latency * 1000)}ms`",
+        description=f"✨ **Bot Status: Online**\n\n📡 Latency: `{round(client.latency * 1000)}ms`",
         color=0x2b2d31
     )
     await interaction.response.send_message(embed=embed)
 
-@client.tree.command(name="send", description="Send a specific reddit link")
+@client.tree.command(name="send", description="Manually post a specific reddit link")
+@app_commands.describe(link="The Reddit link you want to post (e.g. https://reddit.com/r/...)")
 async def send(interaction: discord.Interaction, link: str):
-    await interaction.response.defer() # Veri çekerken botun donmaması için
-    
+    await interaction.response.defer()
     rss_url = link.split("?")[0].rstrip("/") + ".rss"
     try:
         feed = await asyncio.get_event_loop().run_in_executor(executor, feedparser.parse, rss_url)
@@ -69,23 +76,20 @@ async def send(interaction: discord.Interaction, link: str):
             post = feed.entries[0]
             clean_desc = clean_html(post.summary if hasattr(post, 'summary') else '')
             embed = discord.Embed(title=post.title[:250], description=f"{clean_desc[:600]}...", color=0x2b2d31)
-            
             img_url = None
             if 'media_content' in post: img_url = post.media_content[0]['url']
             elif 'media_thumbnail' in post: img_url = post.media_thumbnail[0]['url']
-            
             if img_url: embed.set_image(url=img_url)
-            embed.set_footer(text=f"🧪 Test • Reddit")
+            embed.set_footer(text=f"🧪 Manual Post • Reddit")
             view = discord.ui.View()
             view.add_item(discord.ui.Button(label="View on Reddit", url=post.link, style=discord.ButtonStyle.link))
-            
             await interaction.followup.send(embed=embed, view=view)
         else:
-            await interaction.followup.send("Link is incorrect.")
+            await interaction.followup.send("Could not find any entries for this link.")
     except Exception as e:
-        await interaction.followup.send(f"Error: {e}")
+        await interaction.followup.send(f"Error fetching RSS: {e}")
 
-# --- DİĞER FONKSİYONLAR (AYNI KALDI) ---
+# --- WEB SERVER & AUTO FEEDS ---
 
 async def ping(request):
     return web.Response(text="Bot is Alive!")
@@ -101,7 +105,23 @@ async def start_web_server():
 
 async def check_feeds():
     await client.wait_until_ready()
+    
+    # Cache existing posts on startup
+    print("Caching current RSS entries...")
+    for name, (url, channel_id) in feeds.items():
+        try:
+            feed = await asyncio.get_event_loop().run_in_executor(executor, feedparser.parse, url)
+            if feed.entries:
+                last_posts[name] = feed.entries[0].link
+        except Exception as e:
+            print(f"Cache Error ({name}): {e}")
+    
+    with open("last_posts.json", "w") as f:
+        json.dump(last_posts, f)
+    print("Startup scan complete. Monitoring for new posts...")
+
     await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Reddit RSS"))
+    
     while not client.is_closed():
         for name, (url, channel_id) in feeds.items():
             try:
@@ -123,12 +143,14 @@ async def check_feeds():
                             view = discord.ui.View()
                             view.add_item(discord.ui.Button(label="View on Reddit", url=post.link, style=discord.ButtonStyle.link))
                             await channel.send(embed=embed, view=view)
-            except Exception as e: print(f"Error ({name}): {e}")
+            except Exception as e:
+                print(f"Feed Error ({name}): {e}")
         await asyncio.sleep(60)
 
 @client.event
 async def on_ready():
-    print(f"Bot {client.user} is online!")
+    print(f"Logged in as {client.user} (ID: {client.user.id})")
+    print("------")
 
 async def main():
     await start_web_server()
