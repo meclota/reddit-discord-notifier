@@ -26,7 +26,6 @@ feeds = {
     "tifu": ("https://www.reddit.com/r/tifu/.rss", int(os.environ["TIFU"])),
 }
 
-# Mesaj içeriği okuma izni (Intent) ekleyelim
 intents = discord.Intents.default()
 intents.message_content = True 
 client = discord.Client(intents=intents)
@@ -34,11 +33,10 @@ executor = ThreadPoolExecutor()
 
 def clean_html(raw_html):
     if not raw_html: return ""
-    # Tablo ve link içeren karmaşık yapıları temizle
-    cleanr = re.compile('<.*?>')
-    cleantext = re.sub(cleanr, '', raw_html)
-    # Reddit'in "submitted by", "link", "comments" gibi otomatik yazılarını temizle
-    cleantext = cleantext.split("submitted by")[0].strip()
+    # 1. HTML etiketlerini temizle
+    cleantext = re.sub('<.*?>', '', raw_html)
+    # 2. Reddit'in otomatik eklediği 'submitted by', '[link]', '[comments]' kısımlarını temizle
+    cleantext = re.split(r'submitted by|\[link\]|\[comments\]', cleantext)[0].strip()
     return html.unescape(cleantext)
 
 async def ping(request):
@@ -58,7 +56,12 @@ async def on_message(message):
     if message.author == client.user: return
     
     if message.content == "!test":
-        await message.channel.send(f"✅ Bot Is Alive! Latency: {round(client.latency * 1000)}ms")
+        # Ultra modern test embed
+        embed = discord.Embed(
+            description=f"✨ **Bot is alive**\n\n📡 Latency: `{round(client.latency * 1000)}ms`",
+            color=0x2b2d31 # Discord'un kendi arka plan rengi (Çizgi görünmez olur)
+        )
+        await message.channel.send(embed=embed)
 
 async def check_feeds():
     await client.wait_until_ready()
@@ -75,17 +78,15 @@ async def check_feeds():
 
                         channel = client.get_channel(channel_id)
                         if channel:
-                            # Yazıyı temizle ve başlığı 256 karakterle sınırla
                             clean_desc = clean_html(post.summary if hasattr(post, 'summary') else '')
                             
+                            # MODERERN EMBED TASARIMI
                             embed = discord.Embed(
                                 title=post.title[:250],
-                                url=post.link,
-                                description=clean_desc[:4000],
-                                color=0xff5700 # Reddit Turuncusu
+                                description=f"{clean_desc[:600]}...",
+                                color=0x2b2d31 # Ultra modern görünüm için koyu gri
                             )
                             
-                            # Resim çekme mantığı
                             img_url = None
                             if 'media_content' in post:
                                 img_url = post.media_content[0]['url']
@@ -93,16 +94,21 @@ async def check_feeds():
                                 img_url = post.media_thumbnail[0]['url']
                             
                             if img_url: embed.set_image(url=img_url)
-                            embed.set_footer(text=f"📍 r/{name} • 2026 Otomasyon")
+                            embed.set_footer(text=f"r/{name} • Reddit")
+
+                            # Şık bir buton ekleme
+                            view = discord.ui.View()
+                            button = discord.ui.Button(label="View on Reddit", url=post.link, style=discord.ButtonStyle.link)
+                            view.add_item(button)
                             
-                            await channel.send(embed=embed)
+                            await channel.send(embed=embed, view=view)
             except Exception as e:
                 print(f"Hata ({name}): {e}")
         await asyncio.sleep(60)
 
 @client.event
 async def on_ready():
-    print(f"{client.user} is successfully logged in!")
+    print(f"Bot {client.user} Logged in!")
 
 async def main():
     await start_web_server()
