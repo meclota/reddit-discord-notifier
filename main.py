@@ -1,67 +1,64 @@
+import discord
+from discord.ext import commands, tasks
 import feedparser
-import requests
-import time
 import os
+import asyncio
 
-# Environment variables
-WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-RSS_URLS_STR = os.getenv("RSS_URLS", "")  # Virgülle ayrılmış liste, ör: url1,url2
+# Environment variables (Railway'de ekleyeceğiz)
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))  # Kanal ID'si (Discord'da sağ tık → Copy Channel ID)
+RSS_URLS_STR = os.getenv("RSS_URLS", "")  # virgülle ayrılmış RSS linkleri
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 300))  # saniye, varsayılan 5 dk
 
-if not WEBHOOK_URL:
-    print("HATA: DISCORD_WEBHOOK_URL environment variable eksik!")
-    exit(1)
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-if not RSS_URLS_STR:
-    print("HATA: RSS_URLS environment variable eksik! En az bir subreddit RSS ekle.")
-    exit(1)
+seen_per_feed = {}  # Her feed için seen set'ler
 
-# URL'leri listeye çevir (virgülle ayrılmış, boşlukları temizle)
+@bot.event
+async def on_ready():
+    print(f'Bot hazır! {bot.user} olarak giriş yapıldı.')
+    for url in rss_urls:
+        seen_per_feed[url] = set()
+    check_feeds.start()  # Loop'u başlat
+
 rss_urls = [url.strip() for url in RSS_URLS_STR.split(",") if url.strip()]
 
-print(f"Reddit RSS Notifier başladı... Takip edilen subreddit sayısı: {len(rss_urls)}")
+@tasks.loop(seconds=CHECK_INTERVAL)
+async def check_feeds():
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel:
+        print("Kanal bulunamadı! CHANNEL_ID'yi kontrol et.")
+        return
 
-# Her subreddit için ayrı seen set (tekrar göndermemek için)
-seen_per_feed = {url: set() for url in rss_urls}
-
-def send_to_discord(title, link, summary="", subreddit=""):
-    payload = {
-        "embeds": [{
-            "title": title,
-            "url": link,
-            "description": summary[:800] + "..." if len(summary) > 800 else summary,
-            "color": 16729344,  # Turuncu-kırmızı
-            "footer": {"text": f"r/{subreddit}" if subreddit else ""}
-        }]
-    }
-    try:
-        response = requests.post(WEBHOOK_URL, json=payload)
-        if response.status_code in (200, 204):
-            print(f"Gönderildi: {title} ({subreddit})")
-        else:
-            print(f"Gönderim hatası ({response.status_code}): {response.text}")
-    except Exception as e:
-        print(f"Gönderim hatası: {e}")
-
-while True:
     for rss_url in rss_urls:
         try:
             feed = feedparser.parse(rss_url)
             if 'entries' not in feed or not feed.entries:
-                print(f"Feed boş veya hata: {rss_url}")
                 continue
 
-            # Subreddit adını çıkar (güzel footer için)
             subreddit_name = rss_url.split("/r/")[1].split("/")[0] if "/r/" in rss_url else "Bilinmeyen"
 
-            for entry in reversed(feed.entries):  # En yeni baştan
-                entry_id = entry.get('id') or entry.get('link') or entry.title
-                if entry_id not in seen_per_feed[rss_url]:
-                    summary = entry.get('summary') or entry.get('content', [{}])[0].get('value', '') or ''
-                    send_to_discord(entry.title, entry.link, summary, subreddit_name)
+            for entry in reversed(feed.entries):
+                entry_id = entry.get('id') or entry.link or entry.title
+                if entry_id not in seen_per_feed.get(rss_url, set()):
+                    summary = entry.get('summary') or ''
+                    embed = discord.Embed(
+                        title=entry.title,
+                        url=entry.link,
+                        description=summary[:800] + "..." if len(summary) > 800 else summary,
+                        color=0xFF4500  # Reddit turuncu
+                    )
+                    embed.set_footer(text=f"r/{subreddit_name}")
+                    await channel.send(embed=embed)
                     seen_per_feed[rss_url].add(entry_id)
-                    time.sleep(1)  # Rate limit için kısa ara
+                    await asyncio.sleep(5)  # Her mesaj arası 5 sn bekle (rate limit güvenli)
         except Exception as e:
-            print(f"Feed işleme hatası ({rss_url}): {e}")
+            print(f"Feed hatası ({rss_url}): {e}")
 
-    time.sleep(CHECK_INTERVAL)
+@check_feeds.before_loop
+async def before_check():
+    await bot.wait_until_ready()
+    print("Feed kontrol loop'u başladı.")
+
+bot.run(TOKEN)
