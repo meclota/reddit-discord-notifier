@@ -3,20 +3,21 @@ import asyncio
 import feedparser
 import json
 import os
+import html
 from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor
-import html  # HTML entity decode için
 
+# Ortam Değişkenleri
 TOKEN = os.environ["DISCORD_TOKEN"]
 
-# last_posts.json varsa yükle, yoksa boş dict oluştur
+# last_posts.json kontrolü
 if os.path.exists("last_posts.json"):
     with open("last_posts.json", "r") as f:
         last_posts = json.load(f)
 else:
     last_posts = {}
 
-# subreddit : kanal ID
+# Subreddit ve Kanal Eşleşmeleri
 feeds = {
     "reddit": ("https://www.reddit.com/r/reddit/.rss", int(os.environ["CHANNEL_REDDIT"])),
     "modnews": ("https://www.reddit.com/r/modnews/.rss", int(os.environ["CHANNEL_MODNEWS"])),
@@ -30,30 +31,27 @@ feeds = {
 client = discord.Client(intents=discord.Intents.default())
 executor = ThreadPoolExecutor()
 
-# Basit web server (Replit uyumlu, uptime robot ile 7/24)
+# --- WEB SERVER (REPLIT UYANIK TUTMA) ---
 async def ping(request):
-    return web.Response(text="Bot alive!")
-
-app = web.Application()
-app.router.add_get("/", ping)
+    return web.Response(text="Bot uyanık! 2026 Sistemi Aktif.")
 
 async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", ping)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+    print(f"Web sunucusu {port} portunda başlatıldı.")
 
-# Feed çekme fonksiyonu (thread ile)
+# --- FEED İŞLEMLERİ ---
 def fetch_feed(url):
     return feedparser.parse(url)
 
-@client.event
-async def on_ready():
-    print(f"Giriş yapıldı: {client.user}")
-    asyncio.create_task(start_web_server())
-
-    while True:
+async def check_feeds():
+    await client.wait_until_ready()
+    while not client.is_closed():
         for name, (url, channel_id) in feeds.items():
             try:
                 feed = await asyncio.get_event_loop().run_in_executor(executor, fetch_feed, url)
@@ -65,8 +63,9 @@ async def on_ready():
                             json.dump(last_posts, f)
 
                         channel = client.get_channel(channel_id)
+                        if channel is None:
+                            continue
 
-                        # HTML entity decode ve description kısaltma
                         description = html.unescape(post.summary if hasattr(post, 'summary') else '')
                         if len(description) > 4000:
                             description = description[:4000] + "\n...[Devamı Reddit'te]"
@@ -78,7 +77,6 @@ async def on_ready():
                             color=0xff5700
                         )
 
-                        # Resim ekleme (sadece varsa)
                         media_content = None
                         if 'media_content' in post:
                             media_content = post.media_content[0]['url']
@@ -89,15 +87,29 @@ async def on_ready():
                             embed.set_image(url=media_content)
 
                         embed.set_footer(text=f"r/{name} • Reddit")
-
-                        if channel is not None:
-                            await channel.send(embed=embed)
-                        else:
-                            print(f"Kanal bulunamadı: {channel_id}")
+                        await channel.send(embed=embed)
 
             except Exception as e:
                 print(f"Hata ({name}): {e}")
-
+        
         await asyncio.sleep(60)
 
-client.run(TOKEN)
+@client.event
+async def on_ready():
+    print(f"Giriş yapıldı: {client.user}")
+
+# --- ANA ÇALIŞTIRICI ---
+async def main():
+    # 1. Web Sunucusunu Başlat
+    await start_web_server()
+    # 2. Feed Kontrol Döngüsünü Arka Planda Başlat
+    asyncio.create_task(check_feeds())
+    # 3. Botu Başlat
+    async with client:
+        await client.start(TOKEN)
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
