@@ -17,7 +17,6 @@ if os.path.exists("last_posts.json"):
 else:
     last_posts = {}
 
-# Channel IDs (os.environ ile Secrets'tan çeker, istersen buraya direkt sayı yazabilirsin)
 feeds = {
     "reddit": ("https://www.reddit.com/r/reddit/.rss", int(os.environ["CHANNEL_REDDIT"])),
     "modnews": ("https://www.reddit.com/r/modnews/.rss", int(os.environ["CHANNEL_MODNEWS"])),
@@ -30,15 +29,12 @@ feeds = {
 
 class MyBot(discord.Client):
     def __init__(self):
-        # Intents: Slash komutları ve mesaj içerikleri için gerekli yetkiler
         intents = discord.Intents.default()
         intents.message_content = True 
         super().__init__(intents=intents)
-        # CommandTree: Slash komutlarını yöneten ağaç yapısı
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        # Komutları global olarak Discord'a kaydeder (Sync)
         print("Syncing slash commands...")
         try:
             synced = await self.tree.sync()
@@ -54,6 +50,38 @@ def clean_html(raw_html):
     cleantext = re.sub('<.*?>', '', raw_html)
     cleantext = re.split(r'submitted by|\[link\]|\[comments\]', cleantext)[0].strip()
     return html.unescape(cleantext)
+
+def create_embeds(post, sub_name):
+    """Çoklu resim ve temiz açıklama kontrolü yapan yardımcı fonksiyon"""
+    clean_desc = clean_html(post.summary if hasattr(post, 'summary') else '')
+    # Sadece içerik varsa ve uzunsa sonuna '...' ekle
+    final_desc = f"{clean_desc[:600]}..." if len(clean_desc) > 10 else clean_desc
+    
+    # Resimleri ayıkla
+    images = []
+    if 'media_content' in post:
+        images = [m['url'] for m in post.media_content if 'url' in m]
+    elif 'media_thumbnail' in post:
+        images = [m['url'] for m in post.media_thumbnail if 'url' in m]
+    
+    embeds = []
+    
+    # Ana Embed (Başlık ve Açıklama)
+    main_embed = discord.Embed(title=post.title[:250], description=final_desc, color=0x2b2d31)
+    if images:
+        main_embed.set_image(url=images[0])
+    
+    # Footer (📌 ikonu kaldırıldı)
+    main_embed.set_footer(text=f"{sub_name} • Reddit")
+    embeds.append(main_embed)
+    
+    # Çoklu resimler için ek embedlar (Discord 4 taneye kadar yan yana birleştirir)
+    for img in images[1:4]:
+        extra_embed = discord.Embed(color=0x2b2d31)
+        extra_embed.set_image(url=img)
+        embeds.append(extra_embed)
+        
+    return embeds
 
 # --- SLASH COMMANDS ---
 
@@ -74,16 +102,13 @@ async def send(interaction: discord.Interaction, link: str):
         feed = await asyncio.get_event_loop().run_in_executor(executor, feedparser.parse, rss_url)
         if feed.entries:
             post = feed.entries[0]
-            clean_desc = clean_html(post.summary if hasattr(post, 'summary') else '')
-            embed = discord.Embed(title=post.title[:250], description=f"{clean_desc[:600]}...", color=0x2b2d31)
-            img_url = None
-            if 'media_content' in post: img_url = post.media_content[0]['url']
-            elif 'media_thumbnail' in post: img_url = post.media_thumbnail[0]['url']
-            if img_url: embed.set_image(url=img_url)
-            embed.set_footer(text=f"🧪 Manual Post • Reddit")
+            sub_name = f"r/{link.split('/r/')[1].split('/')[0]}" if "/r/" in link else "Reddit"
+            
+            embeds = create_embeds(post, sub_name)
             view = discord.ui.View()
             view.add_item(discord.ui.Button(label="View on Reddit", url=post.link, style=discord.ButtonStyle.link))
-            await interaction.followup.send(embed=embed, view=view)
+            
+            await interaction.followup.send(embeds=embeds, view=view)
         else:
             await interaction.followup.send("Could not find any entries for this link.")
     except Exception as e:
@@ -106,7 +131,6 @@ async def start_web_server():
 async def check_feeds():
     await client.wait_until_ready()
     
-    # Cache existing posts on startup
     print("Caching current RSS entries...")
     for name, (url, channel_id) in feeds.items():
         try:
@@ -131,18 +155,13 @@ async def check_feeds():
                     if last_posts.get(name) != post.link:
                         last_posts[name] = post.link
                         with open("last_posts.json", "w") as f: json.dump(last_posts, f)
+                        
                         channel = client.get_channel(channel_id)
                         if channel:
-                            clean_desc = clean_html(post.summary if hasattr(post, 'summary') else '')
-                            embed = discord.Embed(title=post.title[:250], description=f"{clean_desc[:600]}...", color=0x2b2d31)
-                            img_url = None
-                            if 'media_content' in post: img_url = post.media_content[0]['url']
-                            elif 'media_thumbnail' in post: img_url = post.media_thumbnail[0]['url']
-                            if img_url: embed.set_image(url=img_url)
-                            embed.set_footer(text=f"r/{name} • Reddit")
+                            embeds = create_embeds(post, f"r/{name}")
                             view = discord.ui.View()
                             view.add_item(discord.ui.Button(label="View on Reddit", url=post.link, style=discord.ButtonStyle.link))
-                            await channel.send(embed=embed, view=view)
+                            await channel.send(embeds=embeds, view=view)
             except Exception as e:
                 print(f"Feed Error ({name}): {e}")
         await asyncio.sleep(60)
