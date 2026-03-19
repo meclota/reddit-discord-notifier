@@ -70,8 +70,7 @@ def create_embeds(post, sub_name):
     main_embed = discord.Embed(title=post.title[:250], description=final_desc, color=0x2b2d31)
     if images:
         main_embed.set_image(url=images[0])
-    
-    # Footer (📌 ikonu kaldırıldı)
+        
     main_embed.set_footer(text=f"{sub_name} • Reddit")
     embeds.append(main_embed)
     
