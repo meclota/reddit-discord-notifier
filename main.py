@@ -33,9 +33,7 @@ executor = ThreadPoolExecutor()
 
 def clean_html(raw_html):
     if not raw_html: return ""
-    # 1. HTML etiketlerini temizle
     cleantext = re.sub('<.*?>', '', raw_html)
-    # 2. Reddit'in otomatik eklediği 'submitted by', '[link]', '[comments]' kısımlarını temizle
     cleantext = re.split(r'submitted by|\[link\]|\[comments\]', cleantext)[0].strip()
     return html.unescape(cleantext)
 
@@ -55,13 +53,57 @@ async def start_web_server():
 async def on_message(message):
     if message.author == client.user: return
     
+    # 1. BASİT TEST KOMUTU
     if message.content == "!test":
-        # Ultra modern test embed
         embed = discord.Embed(
-            description=f"✨ **Bot is alive**\n\n📡 Latency: `{round(client.latency * 1000)}ms`",
-            color=0x2b2d31 # Discord'un kendi arka plan rengi (Çizgi görünmez olur)
+            description=f"✨ **Bot is up*\n\n📡 Latency: `{round(client.latency * 1000)}ms`",
+            color=0x2b2d31
         )
         await message.channel.send(embed=embed)
+
+    # 2. ÖZEL LİNK PAYLAŞMA KOMUTU (!paylas [reddit_linki])
+    if message.content.startswith("!send"):
+        parts = message.content.split(" ")
+        if len(parts) < 2:
+            return await message.channel.send("Please add a reddit link! Example: `!send https://reddit.com/...` ")
+        
+        test_url = parts[1]
+        # Reddit linkini RSS formatına çeviriyoruz (.rss ekleyerek)
+        if not test_url.endswith(".rss"):
+            rss_url = test_url.split("?")[0].rstrip("/") + ".rss"
+        else:
+            rss_url = test_url
+
+        try:
+            feed = await asyncio.get_event_loop().run_in_executor(executor, feedparser.parse, rss_url)
+            if feed.entries:
+                post = feed.entries[0]
+                clean_desc = clean_html(post.summary if hasattr(post, 'summary') else '')
+                
+                embed = discord.Embed(
+                    title=post.title[:250],
+                    description=f"{clean_desc[:600]}...",
+                    color=0x2b2d31
+                )
+                
+                img_url = None
+                if 'media_content' in post:
+                    img_url = post.media_content[0]['url']
+                elif 'media_thumbnail' in post:
+                    img_url = post.media_thumbnail[0]['url']
+                
+                if img_url: embed.set_image(url=img_url)
+                embed.set_footer(text=f"🧪 Test • Reddit")
+
+                view = discord.ui.View()
+                button = discord.ui.Button(label="View on Reddit", url=post.link, style=discord.ButtonStyle.link)
+                view.add_item(button)
+                
+                await message.channel.send(embed=embed, view=view)
+            else:
+                await message.channel.send("Link is incorrect, make sure the link is correct.")
+        except Exception as e:
+            await message.channel.send(f"Hata oluştu: {e}")
 
 async def check_feeds():
     await client.wait_until_ready()
@@ -79,28 +121,21 @@ async def check_feeds():
                         channel = client.get_channel(channel_id)
                         if channel:
                             clean_desc = clean_html(post.summary if hasattr(post, 'summary') else '')
-                            
-                            # MODERERN EMBED TASARIMI
                             embed = discord.Embed(
                                 title=post.title[:250],
                                 description=f"{clean_desc[:600]}...",
-                                color=0x2b2d31 # Ultra modern görünüm için koyu gri
+                                color=0x2b2d31
                             )
-                            
                             img_url = None
                             if 'media_content' in post:
                                 img_url = post.media_content[0]['url']
                             elif 'media_thumbnail' in post:
                                 img_url = post.media_thumbnail[0]['url']
-                            
                             if img_url: embed.set_image(url=img_url)
                             embed.set_footer(text=f"r/{name} • Reddit")
-
-                            # Şık bir buton ekleme
                             view = discord.ui.View()
                             button = discord.ui.Button(label="View on Reddit", url=post.link, style=discord.ButtonStyle.link)
                             view.add_item(button)
-                            
                             await channel.send(embed=embed, view=view)
             except Exception as e:
                 print(f"Hata ({name}): {e}")
@@ -108,7 +143,7 @@ async def check_feeds():
 
 @client.event
 async def on_ready():
-    print(f"Bot {client.user} Logged in!")
+    print(f"Bot {client.user} aktif!")
 
 async def main():
     await start_web_server()
