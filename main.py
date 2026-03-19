@@ -37,7 +37,6 @@ async def ping(request):
 app = web.Application()
 app.router.add_get("/", ping)
 
-# Web serveri async olarak çalıştır
 async def start_web_server():
     runner = web.AppRunner(app)
     await runner.setup()
@@ -52,32 +51,31 @@ def fetch_feed(url):
 @client.event
 async def on_ready():
     print(f"Giriş yapıldı: {client.user}")
-    # Web server başlat
     asyncio.create_task(start_web_server())
 
     while True:
         for name, (url, channel_id) in feeds.items():
             try:
-                # feedparser’i thread içinde çalıştır
                 feed = await asyncio.get_event_loop().run_in_executor(executor, fetch_feed, url)
                 if feed.entries:
                     post = feed.entries[0]
                     if last_posts.get(name) != post.link:
                         last_posts[name] = post.link
-                        # JSON dosyasını güncelle
                         with open("last_posts.json", "w") as f:
                             json.dump(last_posts, f)
 
                         channel = client.get_channel(channel_id)
 
-                        # HTML entity decode
+                        # HTML entity decode ve description kısaltma
                         description = html.unescape(post.summary if hasattr(post, 'summary') else '')
+                        if len(description) > 4000:
+                            description = description[:4000] + "\n...[Devamı Reddit'te]"
 
                         embed = discord.Embed(
                             title=post.title,
                             url=post.link,
                             description=description,
-                            color=0xff5700  # Mee6 turuncu tonu
+                            color=0xff5700
                         )
 
                         # Resim ekleme (sadece varsa)
@@ -100,6 +98,6 @@ async def on_ready():
             except Exception as e:
                 print(f"Hata ({name}): {e}")
 
-        await asyncio.sleep(60)  # 1 dakika bekle
+        await asyncio.sleep(60)
 
 client.run(TOKEN)
