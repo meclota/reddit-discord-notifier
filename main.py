@@ -16,7 +16,6 @@ feeds = {
 }
 
 client = discord.Client(intents=discord.Intents.default())
-
 last_posts = {}
 
 @client.event
@@ -27,26 +26,37 @@ async def on_ready():
         for name, (url, channel_id) in feeds.items():
             try:
                 feed = feedparser.parse(url)
-
                 if feed.entries:
                     post = feed.entries[0]
                     if last_posts.get(name) != post.link:
                         last_posts[name] = post.link
-
                         channel = client.get_channel(channel_id)
 
+                        # Embed oluşturuyoruz
                         embed = discord.Embed(
                             title=post.title,
                             url=post.link,
-                            description=f"📌 r/{name}",
+                            description=(post.summary if hasattr(post, 'summary') else ''),
                             color=0xff4500
                         )
+
+                        # Eğer resim varsa embed'e ekle
+                        media_content = None
+                        if 'media_content' in post:
+                            media_content = post.media_content[0]['url']
+                        elif 'media_thumbnail' in post:
+                            media_content = post.media_thumbnail[0]['url']
+
+                        if media_content:
+                            embed.set_image(url=media_content)
+
+                        embed.set_footer(text=f"r/{name} • Reddit")
 
                         await channel.send(embed=embed)
 
             except Exception as e:
-                print(f"Hata ({name}):", e)
+                print(f"Hata ({name}): {e}")
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(60)  # 1 dakika bekle
 
 client.run(TOKEN)
