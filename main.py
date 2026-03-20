@@ -11,11 +11,17 @@ from concurrent.futures import ThreadPoolExecutor
 
 TOKEN = os.environ["DISCORD_TOKEN"]
 
-if os.path.exists("last_posts.json"):
-    with open("last_posts.json", "r") as f:
-        last_posts = json.load(f)
-else:
-    last_posts = {}
+# Dosya yükleme işlemini güvenli hale getirelim
+def load_last_posts():
+    if os.path.exists("last_posts.json"):
+        try:
+            with open("last_posts.json", "r") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+last_posts = load_last_posts()
 
 feeds = {
     "reddit": ("https://www.reddit.com/r/reddit/.rss", int(os.environ["CHANNEL_REDDIT"])),
@@ -35,7 +41,13 @@ class MyBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        await self.tree.sync()
+        # Senkronizasyonu biraz daha detaylı takip edelim
+        print("Komutlar senkronize ediliyor...")
+        try:
+            await self.tree.sync()
+            print("Senkronizasyon başarılı!")
+        except Exception as e:
+            print(f"Senkronizasyon hatası: {e}")
 
 client = MyBot()
 executor = ThreadPoolExecutor(max_workers=10)
@@ -47,12 +59,10 @@ def clean_html(raw_html):
     return html.unescape(cleantext)
 
 def create_embeds(post, sub_name):
-    """Resimleri yan yana ve büyük gösteren Grid sistemi"""
     clean_desc = clean_html(post.summary if hasattr(post, 'summary') else '')
     final_desc = f"{clean_desc[:600]}..." if len(clean_desc) > 15 else None
     
     images = []
-    # Reddit'in en yüksek kaliteli resim linklerini çek (preview linkleri yerine doğrudan i.redd.it)
     if hasattr(post, 'summary'):
         found_urls = re.findall(r'href="(https://i\.redd\.it/[^"]+\.(?:jpg|png|gif|jpeg))"', post.summary)
         images.extend(found_urls)
@@ -60,21 +70,16 @@ def create_embeds(post, sub_name):
     if 'media_content' in post:
         images.extend([m['url'] for m in post.media_content if 'url' in m])
     
-    # Yinelenenleri sil ve temizle
     images = list(dict.fromkeys(images))
-    
     embeds = []
-    # Discord'da resimlerin yan yana (Grid) dizilmesi için hepsinin URL'si aynı olmalı
     post_url = post.link
 
-    # İlk Embed: Başlık, Açıklama ve İlk Resim
     main_embed = discord.Embed(title=post.title[:250], url=post_url, description=final_desc, color=0x2b2d31)
     if images:
         main_embed.set_image(url=images[0])
     main_embed.set_footer(text=f"{sub_name} • Reddit")
     embeds.append(main_embed)
     
-    # Diğer Resimler: Grid görünümü için başlık ve açıklama içermeyen ama aynı URL'ye sahip embedlar
     for img in images[1:4]:
         extra_embed = discord.Embed(url=post_url, color=0x2b2d31)
         extra_embed.set_image(url=img)
@@ -84,13 +89,15 @@ def create_embeds(post, sub_name):
 
 # --- SLASH COMMANDS ---
 
-@client.tree.command(name="test", description="Check if the bot is alive")
+@client.tree.command(name="test", description="Botun durumunu kontrol eder")
 async def test(interaction: discord.Interaction):
+    # En hızlı yanıt için basit mesaj
     await interaction.response.send_message(f"✅ **Sistem Aktif** | Gecikme: `{round(client.latency * 1000)}ms`", ephemeral=True)
 
-@client.tree.command(name="send", description="Post a reddit link immediately")
+@client.tree.command(name="send", description="Reddit linkini hemen paylaşır")
 async def send(interaction: discord.Interaction, link: str):
-    await interaction.response.defer()
+    # Defer süresini uzatarak hata almayı önleyelim
+    await interaction.response.defer(thinking=True)
     rss_url = link.split("?")[0].rstrip("/") + ".rss"
     try:
         loop = asyncio.get_event_loop()
@@ -105,13 +112,13 @@ async def send(interaction: discord.Interaction, link: str):
         else:
             await interaction.followup.send("İçerik bulunamadı.")
     except Exception as e:
-        await interaction.followup.send(f"Hata: {e}")
+        await interaction.followup.send(f"Hata oluştu: {e}")
 
 # --- WEB SERVER & AUTO FEEDS ---
 
 async def start_web_server():
     app = web.Application()
-    app.router.add_get("/", lambda r: web.Response(text="Bot Alive"))
+    app.router.add_get("/", lambda r: web.Response(text="Bot Alive", content_type='text/html'))
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", 8080).start()
@@ -137,7 +144,12 @@ async def check_feeds():
         await asyncio.sleep(60)
 
 async def main():
-    await start_web_server()
+    # Web sunucusunu başlatırken hata almamak için hata yakalama ekleyelim
+    try:
+        await start_web_server()
+    except Exception as e:
+        print(f"Web sunucu hatası: {e}")
+        
     asyncio.create_task(check_feeds())
     async with client:
         await client.start(TOKEN)
