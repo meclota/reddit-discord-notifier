@@ -12,6 +12,7 @@ TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 
 lock = asyncio.Lock()
 
+# --- DB fonksiyonları ---
 def get_data():
     if "reddit_notifier_db" not in db:
         db["reddit_notifier_db"] = json.dumps({"feeds": {}, "last_posts": {}})
@@ -30,11 +31,11 @@ async def check_subreddit_nsfw(sub_name):
                 if response.status == 200:
                     data = await response.json()
                     return data.get("data", {}).get("over_18", False)
-                return True  # hata olursa güvenlik için NSFW kabul
+                return True
     except:
         return True
 
-# AUTOCOMPLETE
+# --- AUTOCOMPLETE ---
 async def subreddit_autocomplete(interaction: discord.Interaction, current: str):
     current_data = get_data()
     feeds = current_data.get("feeds", {})
@@ -43,6 +44,7 @@ async def subreddit_autocomplete(interaction: discord.Interaction, current: str)
         for sub in feeds.keys() if current.lower() in sub.lower()
     ][:25]
 
+# --- BOT CLASS ---
 class MyBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -87,13 +89,22 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, channel: di
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
     current_data = get_data()
+    
     if sub_clean in current_data["feeds"]:
         del current_data["feeds"][sub_clean]
         current_data["last_posts"].pop(sub_clean, None)
         save_data(current_data)
-        await interaction.response.send_message(f"🗑️ Deleted: r/{sub_clean}")
+
+        # Güncel listeyi göster
+        if current_data["feeds"]:
+            items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in current_data["feeds"].items()]
+            msg = f"🗑️ Deleted: r/{sub_clean}\n\n📋 **Current Feeds:**\n" + "\n".join(items)
+        else:
+            msg = f"🗑️ Deleted: r/{sub_clean}\n\n📋 List is now empty."
+        
+        await interaction.response.send_message(msg, ephemeral=False)
     else:
-        await interaction.response.send_message(f"❌ r/{sub_clean} not found.")
+        await interaction.response.send_message(f"❌ r/{sub_clean} not found.", ephemeral=False)
 
 @client.tree.command(name="feed_list", description="Show the list")
 async def feed_list(interaction: discord.Interaction):
