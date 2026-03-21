@@ -41,7 +41,7 @@ class MyBot(discord.Client):
         await self.tree.sync()
 
     async def on_ready(self):
-        # HATA 2 & 3 ÇÖZÜMÜ: self.user'ın None olmadığını kontrol ediyoruz
+        # self.user'ın None olmadığını kontrol ediyoruz
         if self.user:
             print('------')
             print(f'Logged in as {self.user.name} (ID: {self.user.id})')
@@ -59,7 +59,7 @@ async def send(interaction: discord.Interaction, link: str):
 @client.tree.command(name="status", description="Bot durumunu kontrol et")
 async def status(interaction: discord.Interaction):
     ping = round(client.latency * 1000)
-    await interaction.response.send_message(f"✅ **Aktif** | `{ping}ms`", ephemeral=True)
+    await interaction.response.send_message(f"**Latency** | `{ping}ms`", ephemeral=True)
 
 # --- OTOMATİK FEED KONTROLÜ ---
 
@@ -73,18 +73,22 @@ async def check_feeds():
 
                 if f and f.entries:
                     post = f.entries[0]
-                    if last_posts.get(name) != post.link:
-                        last_posts[name] = post.link
+                    # Linki temizleyerek karşılaştır (Çift atmayı önleyen kısım)
+                    raw_post_link = post.link.split('?')[0].rstrip('/')
+
+                    if last_posts.get(name) != raw_post_link:
+                        last_posts[name] = raw_post_link
                         with open("last_posts.json", "w") as j: 
                             json.dump(last_posts, j)
 
                         channel = client.get_channel(channel_id)
-                        # HATA 1 ÇÖZÜMÜ: Kanalın mesaj gönderilebilir (abc.Messageable) olduğunu doğruluyoruz
                         if isinstance(channel, discord.abc.Messageable):
-                            fixed_rss_link = post.link.replace("reddit.com", "rxddit.com").replace("www.", "")
+                            # Sadece GÖNDERİRKEN rxddit'e çeviriyoruz
+                            fixed_rss_link = raw_post_link.replace("reddit.com", "rxddit.com").replace("www.", "")
                             await channel.send(content=fixed_rss_link)
             except:
                 pass
+
         await asyncio.sleep(60)
 
 # --- WEB SERVER ---
