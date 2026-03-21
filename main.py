@@ -20,6 +20,20 @@ def get_data():
 def save_data(new_data):
     db["reddit_notifier_db"] = json.dumps(new_data)
 
+# --- NSFW kontrol fonksiyonu ---
+async def check_subreddit_nsfw(sub_name):
+    url = f"https://www.reddit.com/r/{sub_name}/about.json"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("data", {}).get("over_18", False)
+                return True  # hata olursa güvenlik için NSFW kabul
+    except:
+        return True
+
 # AUTOCOMPLETE
 async def subreddit_autocomplete(interaction: discord.Interaction, current: str):
     current_data = get_data()
@@ -52,11 +66,20 @@ client = MyBot()
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
     current_data = get_data()
+
+    # NSFW kontrol
+    is_nsfw_sub = await check_subreddit_nsfw(sub_clean)
+    if is_nsfw_sub and not channel.is_nsfw():
+        return await interaction.response.send_message(
+            f"❌ Cannot add r/{sub_clean}: Subreddit is NSFW but channel is not NSFW.", ephemeral=True
+        )
+
     if sub_clean in current_data["feeds"]:
-        return await interaction.response.send_message(f"❌ r/{sub_clean} is already in the list.")
+        return await interaction.response.send_message(f"❌ r/{sub_clean} is already in the list.", ephemeral=True)
+
     current_data["feeds"][sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
     save_data(current_data)
-    await interaction.response.send_message(f"✅ Success: r/{sub_clean} added.")
+    await interaction.response.send_message(f"✅ Success: r/{sub_clean} added.", ephemeral=True)
 
 @client.tree.command(name="remove_feed", description="Remove a subreddit")
 @app_commands.default_permissions(administrator=True)
@@ -68,19 +91,19 @@ async def remove_feed(interaction: discord.Interaction, subreddit: str):
         del current_data["feeds"][sub_clean]
         current_data["last_posts"].pop(sub_clean, None)
         save_data(current_data)
-        await interaction.response.send_message(f"🗑️ Deleted: r/{sub_clean}")
+        await interaction.response.send_message(f"🗑️ Deleted: r/{sub_clean}", ephemeral=True)
     else:
-        await interaction.response.send_message(f"❌ r/{sub_clean} not found.")
+        await interaction.response.send_message(f"❌ r/{sub_clean} not found.", ephemeral=True)
 
 @client.tree.command(name="feed_list", description="Show the list")
 async def feed_list(interaction: discord.Interaction):
     current_data = get_data()
     if not current_data["feeds"]:
-        return await interaction.response.send_message("📋 List empty.")
+        return await interaction.response.send_message("📋 List empty.", ephemeral=True)
     items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in current_data["feeds"].items()]
     await interaction.response.send_message(f"📋 **Feeds:**\n" + "\n".join(items))
 
-# --- /send command (komutu yazdığın kanala gönderir) ---
+# --- /send command with NSFW check ---
 @client.tree.command(
     name="send",
     description="Send a specific Reddit post to the current Discord channel"
@@ -92,11 +115,25 @@ async def send(interaction: discord.Interaction, reddit_link: str):
         return await interaction.response.send_message(
             "❌ Cannot send to this channel.", ephemeral=True
         )
+
+    # Subreddit adını linkten al
+    try:
+        sub_name = reddit_link.split("/r/")[1].split("/")[0].lower()
+    except IndexError:
+        return await interaction.response.send_message(
+            "❌ Invalid Reddit link format.", ephemeral=True
+        )
+
+    # NSFW kontrol
+    is_nsfw_sub = await check_subreddit_nsfw(sub_name)
+    if is_nsfw_sub and not chan.is_nsfw():
+        return await interaction.response.send_message(
+            "❌ NSFW subreddit cannot be sent to a non-NSFW channel.", ephemeral=True
+        )
+
     cleaned_link = reddit_link.replace("reddit.com", "rxddit.com")
     await chan.send(content=cleaned_link)
-    await interaction.response.send_message(
-        f"✅ Link sent to this channel!", ephemeral=True
-    )
+    # geri bildirim mesajı yok
 
 # --- Feed loop ---
 async def check_feeds():
