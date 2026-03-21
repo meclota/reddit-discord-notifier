@@ -11,7 +11,7 @@ import time
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FEEDS_FILE = os.path.join(BASE_DIR, "feeds.json")
 LAST_POSTS_FILE = os.path.join(BASE_DIR, "last_posts.json")
-TOKEN = os.environ["DISCORD_TOKEN"]
+TOKEN = os.environ.get("DISCORD_TOKEN") # os.environ["..."] yerine .get hata vermesini engeller
 
 def load_data(filename):
     if not os.path.exists(filename):
@@ -62,15 +62,16 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, kanal: disc
     await interaction.response.defer(ephemeral=True)
     f = load_data(FEEDS_FILE)
     sub = subreddit.lower().replace("r/", "").strip()
-    
-    # HATA ÇÖZÜMÜ: Kanalın mesaj gönderilebilir olduğunu kontrol ediyoruz
+
     if not isinstance(kanal, discord.abc.Messageable):
         return await interaction.followup.send("Hata: Seçilen kanala mesaj gönderilemez.", ephemeral=True)
 
     if sub in f: return await interaction.followup.send("Zaten ekli.", ephemeral=True)
-    if await check_subreddit_nsfw(sub) and not getattr(kanal, 'nsfw', False):
-        return await interaction.followup.send("Hata: Kanal NSFW değil.", ephemeral=True)
     
+    is_nsfw = await check_subreddit_nsfw(sub)
+    if is_nsfw and not getattr(kanal, 'nsfw', False):
+        return await interaction.followup.send("Hata: Kanal NSFW değil.", ephemeral=True)
+
     f[sub] = [f"https://www.reddit.com/r/{sub}/new/.rss", kanal.id]
     save_data(FEEDS_FILE, f)
     await interaction.followup.send(f"✅ r/{sub} eklendi.", ephemeral=True)
@@ -97,22 +98,16 @@ async def send(interaction: discord.Interaction, link: str):
         await interaction.response.send_message(content=fixed)
     except: await interaction.response.send_message("Geçersiz link.", ephemeral=True)
 
-@client.tree.command(name="feed_list")
-async def feed_list(interaction: discord.Interaction):
-    f = load_data(FEEDS_FILE)
-    if not f: return await interaction.response.send_message("Liste boş.", ephemeral=True)
-    msg = "\n".join([f"• **r/{k}** -> <#{v[1]}>" for k, v in f.items()])
-    await interaction.response.send_message(f"📋 **Aktif Akışlar:**\n{msg}", ephemeral=True)
-
+# --- DÜZENLENMİŞ FEED DÖNGÜSÜ ---
 async def check_feeds():
     await client.wait_until_ready()
-    while not client.is_closed():
-        f = load_data(FEEDS_FILE)
-        for name, (url, ch_id) in list(f.items()):
-            try:
-                # HTTP isteğini feedparser'a güvenli şekilde gönderiyoruz
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as resp:
+    # Tek bir session üzerinden gitmek Replit ban riskini azaltır
+    async with aiohttp.ClientSession() as session:
+        while not client.is_closed():
+            f = load_data(FEEDS_FILE)
+            for name, (url, ch_id) in list(f.items()):
+                try:
+                    async with session.get(url, timeout=10) as resp:
                         if resp.status == 200:
                             content = await resp.read()
                             feed = feedparser.parse(content)
@@ -122,14 +117,16 @@ async def check_feeds():
                                     last_posts[name] = link
                                     save_data(LAST_POSTS_FILE, last_posts)
                                     chan = client.get_channel(ch_id)
-                                    # HATA ÇÖZÜMÜ: Kanalın tipini kontrol ediyoruz
                                     if chan and isinstance(chan, discord.abc.Messageable):
                                         await chan.send(content=link.replace("reddit.com", "rxddit.com").replace("www.", ""))
-            except: pass
-            await asyncio.sleep(1)
-        await asyncio.sleep(120)
+                except: pass
+                await asyncio.sleep(2) # Sublar arası kısa bekleme
+            await asyncio.sleep(120) # Tüm liste bitince 2 dk bekle
 
 async def main():
+    if not TOKEN:
+        print("HATA: DISCORD_TOKEN bulunamadı! Secrets kısmını kontrol et.")
+        return
     async with client:
         client.loop.create_task(check_feeds())
         await client.start(TOKEN)
