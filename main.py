@@ -1,3 +1,5 @@
+#test to see
+
 import discord
 from discord import app_commands
 import asyncio
@@ -17,6 +19,18 @@ def get_data():
 
 def save_data(new_data):
     db["reddit_notifier_db"] = json.dumps(new_data)
+
+# --- AUTOCOMPLETE FUNCTION (MUST BE DEFINED BEFORE THE COMMAND) ---
+async def subreddit_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    current_data = get_data()
+    feeds = current_data.get("feeds", {})
+    return [
+        app_commands.Choice(name=f"r/{sub}", value=sub)
+        for sub in feeds.keys() if current.lower() in sub.lower()
+    ][:25]
 
 class MyBot(discord.Client):
     def __init__(self):
@@ -43,19 +57,7 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, channel: di
     save_data(current_data)
     await interaction.response.send_message(f"✅ Success: r/{sub_clean} added to cloud storage.")
 
-# --- AUTOCOMPLETE FOR REMOVE ---
-async def subreddit_autocomplete(
-    interaction: discord.Interaction,
-    current: str,
-) -> list[app_commands.Choice[str]]:
-    current_data = get_data()
-    feeds = current_data.get("feeds", {})
-    return [
-        app_commands.Choice(name=f"r/{sub}", value=sub)
-        for sub in feeds.keys() if current.lower() in sub.lower()
-    ][:25]
-
-# --- UPDATED REMOVE COMMAND ---
+# --- REMOVE COMMAND WITH AUTOCOMPLETE ---
 @client.tree.command(name="remove_feed", description="Remove a subreddit")
 @app_commands.default_permissions(administrator=True)
 @app_commands.autocomplete(subreddit=subreddit_autocomplete)
@@ -70,7 +72,6 @@ async def remove_feed(interaction: discord.Interaction, subreddit: str):
         await interaction.response.send_message(f"🗑️ Deleted: r/{sub_clean} removed from cloud.")
     else:
         await interaction.response.send_message(f"❌ Error: r/{sub_clean} not found.")
-# ---------------------------------
 
 @client.tree.command(name="feed_list", description="Show the list")
 async def feed_list(interaction: discord.Interaction):
