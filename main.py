@@ -21,13 +21,13 @@ def load_last_posts():
 last_posts = load_last_posts()
 
 feeds = {
-    "reddit": ("https://www.reddit.com/r/reddit/.rss", int(os.environ["CHANNEL_REDDIT"])),
-    "modnews": ("https://www.reddit.com/r/modnews/.rss", int(os.environ["CHANNEL_MODNEWS"])),
-    "place": ("https://www.reddit.com/r/place/.rss", int(os.environ["CHANNEL_PLACE"])),
-    "worldnews": ("https://www.reddit.com/r/worldnews/.rss", int(os.environ["CHANNEL_WORLDNEWS"])),
-    "technews": ("https://www.reddit.com/r/technews/.rss", int(os.environ["TECH_NEWS"])),
-    "EarthPorn": ("https://www.reddit.com/r/EarthPorn/.rss", int(os.environ["EARTH_NATURES"])),
-    "tifu": ("https://www.reddit.com/r/tifu/.rss", int(os.environ["TIFU"])),
+    "reddit": ("https://www.reddit.com/r/reddit/new/.rss", int(os.environ["CHANNEL_REDDIT"])),
+    "modnews": ("https://www.reddit.com/r/modnews/new/.rss", int(os.environ["CHANNEL_MODNEWS"])),
+    "place": ("https://www.reddit.com/r/place/new/.rss", int(os.environ["CHANNEL_PLACE"])),
+    "worldnews": ("https://www.reddit.com/r/worldnews/new/.rss", int(os.environ["CHANNEL_WORLDNEWS"])),
+    "technews": ("https://www.reddit.com/r/technews/new/.rss", int(os.environ["TECH_NEWS"])),
+    "EarthPorn": ("https://www.reddit.com/r/EarthPorn/new/.rss", int(os.environ["EARTH_NATURES"])),
+    "tifu": ("https://www.reddit.com/r/tifu/new/.rss", int(os.environ["TIFU"])),
 }
 
 class MyBot(discord.Client):
