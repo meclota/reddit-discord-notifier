@@ -81,22 +81,15 @@ async def feed_list(interaction: discord.Interaction):
     await interaction.response.send_message(f"📋 **Feeds:**\n" + "\n".join(items))
 
 # --- /send command (komutu yazdığın kanala gönderir) ---
-@client.tree.command(
-    name="send",
-    description="Send a specific Reddit post to the current Discord channel"
-)
+@client.tree.command(name="send",description="Send a specific Reddit post to the current Discord channel")
 @app_commands.default_permissions(administrator=True)
 async def send(interaction: discord.Interaction, reddit_link: str):
     chan = interaction.channel
     if not isinstance(chan, discord.abc.Messageable):
         return await interaction.response.send_message(
-            "❌ Cannot send to this channel.", ephemeral=True
-        )
+            "❌ Cannot send to this channel.", ephemeral=True)
     cleaned_link = reddit_link.replace("reddit.com", "rxddit.com")
     await chan.send(content=cleaned_link)
-    await interaction.response.send_message(
-        f"✅ Link sent to this channel!", ephemeral=True
-    )
 
 # --- Feed loop ---
 async def check_feeds():
