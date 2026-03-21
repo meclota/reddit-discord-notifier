@@ -12,28 +12,37 @@ class BridgeBot(discord.Client):
 
     async def setup_hook(self):
         await self.tree.sync()
-        print("--- DEBUG: Discord Köprüsü Hazır! ---")
+
+    async def on_ready(self):
+        # Shell girişini de o istediğin klasik formata çektim
+        print('------')
+        print(f'Logged in as {self.user.name} (ID: {self.user.id})')
+        print('------')
 
 client = BridgeBot()
 
-@client.tree.command(name="send", description="Reddit linkini Discord dostu yapar")
+@client.tree.command(name="send", description="Reddit içeriğini profesyonelce paylaşır")
 async def send(interaction: discord.Interaction, link: str):
-    # Resim çekme motoruna dokunmuyoruz
+    # Resim çekme mekanizması (Dokunulmadı)
     fixed_link = link.replace("reddit.com", "rxddit.com").replace("www.", "")
     
-    # SADECE METİN DÜZENLEMESİ: 
-    # Roket silindi, link en başta duruyor (resim gelmesi için en güvenli yol budur)
-    await interaction.response.send_message(content=f"{fixed_link}")
+    # En güvenli, en sade gönderim: Sadece rxddit linki.
+    # Discord bu linki görünce otomatik olarak alt bilgileri ve resmi çeker.
+    await interaction.response.send_message(content=fixed_link)
 
 # Replit'i canlı tutmak için
-async def main():
+async def start_server():
     app = web.Application()
     app.router.add_get("/", lambda r: web.Response(text="Bot Aktif"))
     runner = web.AppRunner(app)
     await runner.setup()
     try: await web.TCPSite(runner, "0.0.0.0", 8080).start()
     except: pass
-    async with client: await client.start(TOKEN)
+
+async def main():
+    await start_server()
+    async with client: 
+        await client.start(TOKEN)
 
 if __name__ == "__main__":
     asyncio.run(main())
