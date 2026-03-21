@@ -84,7 +84,6 @@ async def feed_list(interaction: discord.Interaction):
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
-        # Her döngü başında güncel listeyi çek
         current_db = get_data()
         feeds = current_db.get("feeds", {})
 
@@ -98,30 +97,33 @@ async def check_feeds():
                             f = feedparser.parse(content)
                             
                             if f.entries:
-                                # LİNK TEMİZLİĞİ: Küçük harf yap, parametreleri at, son slash'ı sil
-                                raw_link = f.entries[0].link.split('?')[0].rstrip('/').lower()
+                                # ──── Çok daha sağlam link normalizasyonu ────
+                                original_link = f.entries[0].link
+                                # Parametreleri kaldır, son slash'ı temizle, protokolü ve www'yi standardize et
+                                cleaned = original_link.split('?')[0].rstrip('/')
+                                cleaned = cleaned.replace("https://", "").replace("http://", "")
+                                cleaned = cleaned.replace("www.", "").replace("old.", "")
+                                cleaned = cleaned.lower()           # en son lower
                                 
-                                # VERİTABANINDAN ANLIK KONTROL (Cache yerine direkt DB)
                                 fresh_db = get_data()
-                                last_link = fresh_db["last_posts"].get(name, "").lower()
-
-                                if last_link != raw_link:
-                                    # ÖNEMLİ: Önce DB'yi güncelle ki mesaj gitmeden "gönderildi" sayılsın
-                                    fresh_db["last_posts"][name] = raw_link
+                                last_cleaned = fresh_db["last_posts"].get(name, "")
+                                
+                                if last_cleaned != cleaned:
+                                    # ──── DB’yi HEMEN güncelle ────
+                                    fresh_db["last_posts"][name] = cleaned
                                     save_data(fresh_db)
                                     
                                     chan = client.get_channel(ch_id)
                                     if isinstance(chan, discord.abc.Messageable):
-                                        # Paylaş ve konsola yaz
-                                        print(f"✅ New post sent: r/{name} -> {raw_link}")
-                                        await chan.send(content=raw_link.replace("reddit.com", "rxddit.com"))
+                                        print(f"✅ New post sent: r/{name} → {original_link}")
+                                        # Orijinal link yerine temizlenmiş ama okunabilir hali göndermek istersen:
+                                        send_link = f"https://{original_link.split('?')[0].rstrip('/')}"
+                                        await chan.send(content=send_link.replace("reddit.com", "rxddit.com"))
                                     
-                                    # DB'nin senkronize olması için kısa bir es
                                     await asyncio.sleep(1)
             except Exception as e:
                 print(f"⚠️ Loop Error for r/{name}: {e}")
             
-            # Subredditler arası kısa bekleme (Replit DB hız sınırı için)
             await asyncio.sleep(2)
         await asyncio.sleep(60)
 
