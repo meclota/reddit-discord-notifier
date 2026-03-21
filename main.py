@@ -8,7 +8,7 @@ import aiohttp
 import time
 from aiohttp import web
 
-TOKEN = os.environ["TOKEN"]
+TOKEN = os.environ["DISCORD_TOKEN"]
 
 # --- VERİ YÖNETİMİ (GÜÇLENDİRİLMİŞ) ---
 def load_data(filename):
