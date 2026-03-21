@@ -6,8 +6,7 @@ import json
 import feedparser
 import aiohttp
 from aiohttp import web
-from replit import db
-from typing import Optional  # <- Burayı ekledik
+from replit import db 
 
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 
@@ -81,20 +80,23 @@ async def feed_list(interaction: discord.Interaction):
     items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in current_data["feeds"].items()]
     await interaction.response.send_message(f"📋 **Feeds:**\n" + "\n".join(items))
 
-# --- /send command ---
-@client.tree.command(name="send", description="Send a specific Reddit post to a Discord channel")
+# --- /send command (komutu yazdığın kanala gönderir) ---
+@client.tree.command(
+    name="send",
+    description="Send a specific Reddit post to the current Discord channel"
+)
 @app_commands.default_permissions(administrator=True)
-async def send_post(
-    interaction: discord.Interaction,
-    reddit_link: str,
-    channel: Optional[discord.abc.GuildChannel] = None  # Optional olarak fix
-):
-    target_channel = channel or interaction.channel
-    if not isinstance(target_channel, discord.abc.Messageable):
-        return await interaction.response.send_message("❌ Cannot send to this channel.", ephemeral=True)
+async def send(interaction: discord.Interaction, reddit_link: str):
+    chan = interaction.channel
+    if not isinstance(chan, discord.abc.Messageable):
+        return await interaction.response.send_message(
+            "❌ Cannot send to this channel.", ephemeral=True
+        )
     cleaned_link = reddit_link.replace("reddit.com", "rxddit.com")
-    await target_channel.send(content=cleaned_link)
-    await interaction.response.send_message(f"✅ Link sent to <#{target_channel.id}>!", ephemeral=True)
+    await chan.send(content=cleaned_link)
+    await interaction.response.send_message(
+        f"✅ Link sent to this channel!", ephemeral=True
+    )
 
 # --- Feed loop ---
 async def check_feeds():
