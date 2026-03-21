@@ -15,29 +15,42 @@ feeds = {}
 last_posts = {}
 nsfw_cache = {}
 
-# --- DATABASE SYNC ---
+# --- DATABASE MANAGEMENT (ULTRA SAFE) ---
 def sync_from_db():
     global feeds, last_posts
     try:
-        # Replit DB'den verileri çekiyoruz
-        feeds_raw = db.get("feeds", "{}")
-        lp_raw = db.get("last_posts", "{}")
-
-        # Veri string ise parse et, değilse direkt sözlüğe çevir
-        feeds.update(json.loads(feeds_raw) if isinstance(feeds_raw, str) else dict(feeds_raw))
-        last_posts.update(json.loads(lp_raw) if isinstance(lp_raw, str) else dict(lp_raw))
-        print("✅ Data synced from Replit DB.")
+        # Replit DB'den ham veriyi al
+        f_data = db.get("feeds")
+        l_data = db.get("last_posts")
+        
+        # Eğer veri yoksa veya bozuksa boş sözlük ata
+        if f_data is None:
+            db["feeds"] = "{}"
+            feeds = {}
+        else:
+            feeds.update(json.loads(f_data) if isinstance(f_data, str) else dict(f_data))
+            
+        if l_data is None:
+            db["last_posts"] = "{}"
+            last_posts = {}
+        else:
+            last_posts.update(json.loads(l_data) if isinstance(l_data, str) else dict(l_data))
+            
+        print(f"✅ Database Synced: {len(feeds)} feeds loaded.")
     except Exception as e:
-        print(f"⚠️ DB Sync Error: {e}")
+        print(f"⚠️ Critical DB Error, resetting memory: {e}")
+        feeds = {}
+        last_posts = {}
 
 def save_to_db():
     try:
+        # Veriyi JSON string olarak kaydetmek en güvenli yoldur
         db["feeds"] = json.dumps(feeds)
         db["last_posts"] = json.dumps(last_posts)
     except Exception as e:
-        print(f"❌ DB Save Error: {e}")
+        print(f"❌ DB Save Failed: {e}")
 
-# Bot başlamadan verileri hafızaya al
+# Uygulama başında bir kez çalıştır
 sync_from_db()
 
 class MyBot(discord.Client):
@@ -75,7 +88,7 @@ async def check_subreddit_nsfw(sub_name):
         return False
     except: return False
 
-# --- COMMANDS ---
+# --- COMMANDS (ALL ENGLISH & SYNCED) ---
 
 @client.tree.command(name="add_feed", description="Add a new subreddit feed")
 @app_commands.default_permissions(administrator=True)
@@ -104,29 +117,30 @@ async def remove_feed(interaction: discord.Interaction, subreddit: str):
         save_to_db()
         await interaction.response.send_message(f"🗑️ Removed: r/{sub_clean}", ephemeral=False)
     else:
-        await interaction.response.send_message(f"❌ Error: r/{sub_clean} not found.", ephemeral=False)
+        # DÜZELTİLDİ: "Bulunamadı" yerine İngilizce hata
+        await interaction.response.send_message(f"❌ Error: r/{sub_clean} not found in the list.", ephemeral=False)
 
 @client.tree.command(name="feed_list", description="Show all active feeds")
 async def feed_list(interaction: discord.Interaction):
+    # Doğrudan RAM'deki güncel feeds değişkenini bas
     if not feeds:
         return await interaction.response.send_message("📋 The list is empty.", ephemeral=False)
+    
     msg = "\n".join([f"• **r/{k}** -> <#{v[1]}>" for k, v in feeds.items()])
     await interaction.response.send_message(f"📋 **Active Feeds:**\n{msg}", ephemeral=False)
 
-@client.tree.command(name="send", description="Convert link to rxddit (NSFW Checked)")
+@client.tree.command(name="send", description="Convert link to rxddit")
 async def send(interaction: discord.Interaction, link: str):
     try:
         sub_name = link.split("/r/")[1].split("/")[0].lower()
-        is_nsfw = await check_subreddit_nsfw(sub_name)
-        if is_nsfw and not getattr(interaction.channel, 'nsfw', False):
-            return await interaction.response.send_message("❌ Error: NSFW link in non-NSFW channel.", ephemeral=False)
-        
+        if await check_subreddit_nsfw(sub_name) and not getattr(interaction.channel, 'nsfw', False):
+            return await interaction.response.send_message("❌ Error: NSFW content in non-NSFW channel.", ephemeral=False)
         fixed = link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
         await interaction.response.send_message(content=fixed, ephemeral=False)
     except:
-        await interaction.response.send_message("❌ Error: Invalid link.", ephemeral=False)
+        await interaction.response.send_message("❌ Error: Invalid Reddit link.", ephemeral=False)
 
-# --- LOOP ---
+# --- AUTO LOOP ---
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
@@ -142,9 +156,7 @@ async def check_feeds():
                                 if last_posts.get(name) != link:
                                     last_posts[name] = link
                                     save_to_db()
-                                    
                                     chan = client.get_channel(ch_id)
-                                    # Tip hatasını gideren kısım: kanalın mesaj gönderilebilir olduğunu doğrula
                                     if isinstance(chan, discord.abc.Messageable):
                                         if "over_18" in str(f.entries[0]) and not getattr(chan, 'nsfw', False):
                                             continue
@@ -164,9 +176,7 @@ async def start_web_server():
 
 async def main():
     await start_web_server()
-    if not TOKEN:
-        print("CRITICAL: TOKEN NOT FOUND")
-        return
+    if not TOKEN: return
     async with client:
         client.loop.create_task(check_feeds())
         await client.start(TOKEN)
