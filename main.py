@@ -1,5 +1,3 @@
-#test to see
-
 import discord
 from discord import app_commands
 import asyncio
@@ -45,9 +43,22 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, channel: di
     save_data(current_data)
     await interaction.response.send_message(f"✅ Success: r/{sub_clean} added to cloud storage.")
 
-# --- REMOVE COMMAND ---
+# --- AUTOCOMPLETE FOR REMOVE ---
+async def subreddit_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    current_data = get_data()
+    feeds = current_data.get("feeds", {})
+    return [
+        app_commands.Choice(name=f"r/{sub}", value=sub)
+        for sub in feeds.keys() if current.lower() in sub.lower()
+    ][:25]
+
+# --- UPDATED REMOVE COMMAND ---
 @client.tree.command(name="remove_feed", description="Remove a subreddit")
 @app_commands.default_permissions(administrator=True)
+@app_commands.autocomplete(subreddit=subreddit_autocomplete)
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
     current_data = get_data()
