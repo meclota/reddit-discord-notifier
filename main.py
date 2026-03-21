@@ -92,8 +92,15 @@ async def remove_feed(interaction: discord.Interaction, subreddit: str):
         del current_data["feeds"][sub_clean]
         current_data["last_posts"].pop(sub_clean, None)
         save_data(current_data)
-        # Ephemeral=False yaparak mesaj herkesin görmesini sağlıyoruz
-        await interaction.response.send_message(f"🗑️ Deleted: r/{sub_clean}", ephemeral=False)
+        
+        # Güncel listeyi al
+        if current_data["feeds"]:
+            items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in current_data["feeds"].items()]
+            msg = f"🗑️ Deleted: r/{sub_clean}\n\n📋 **Current Feeds:**\n" + "\n".join(items)
+        else:
+            msg = f"🗑️ Deleted: r/{sub_clean}\n\n📋 List is now empty."
+        
+        await interaction.response.send_message(msg, ephemeral=False)
     else:
         await interaction.response.send_message(f"❌ r/{sub_clean} not found.", ephemeral=False)
 
