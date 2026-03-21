@@ -133,8 +133,12 @@ async def main():
     app.router.add_get("/", lambda r: web.Response(text="Bot Online"))
     runner = web.AppRunner(app)
     await runner.setup()
-    try: await web.TCPSite(runner, "0.0.0.0", 8080).start()
-    except: pass
+    
+    try:
+        await web.TCPSite(runner, "0.0.0.0", 8080).start()
+    except Exception:
+        pass  # Replit'te bazen port zaten alınmış oluyor, görmezden gel
+    
     if TOKEN:
         async with client:
             client.loop.create_task(check_feeds())
