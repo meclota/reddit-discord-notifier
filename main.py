@@ -1,5 +1,3 @@
-#dvv
-
 import discord
 from discord import app_commands
 import asyncio
@@ -8,9 +6,8 @@ import json
 import os
 import aiohttp
 from aiohttp import web
-from replit import db # Replit'in yerleşik DB kütüphanesi
+from replit import db
 
-# --- ENV ---
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 
 class MyBot(discord.Client):
@@ -24,22 +21,23 @@ class MyBot(discord.Client):
         await self.tree.sync()
 
     async def on_ready(self):
-        # DB Başlangıç Kontrolü
-        if "feeds" not in db: db["feeds"] = "{}"
-        if "last_posts" not in db: db["last_posts"] = "{}"
-        print(f'------\nLogged in as {self.user}\nDatabase Ready\n------')
+        print(f'------\nLogged in as {self.user}\n------')
 
 client = MyBot()
 
-# --- DB HELPERS ---
-def get_db_dict(key):
-    try:
-        data = db.get(key, "{}")
-        return json.loads(data) if isinstance(data, str) else dict(data)
-    except: return {}
+# --- DB HELPERS (EN GÜVENLİ YOL) ---
+def db_save(key, data_dict):
+    # Veriyi JSON string'e çevirip öyle kaydet (Replit DB nesne hatasını önler)
+    db[key] = json.dumps(data_dict)
 
-def set_db_dict(key, data):
-    db[key] = json.dumps(data)
+def db_load(key):
+    try:
+        raw_data = db.get(key, "{}")
+        # Eğer veri zaten sözlükse (Replit bazen otomatik çevirir) direkt döndür
+        if isinstance(raw_data, dict): return raw_data
+        return json.loads(raw_data)
+    except:
+        return {}
 
 # --- COMMANDS ---
 
@@ -48,51 +46,55 @@ def set_db_dict(key, data):
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
     await interaction.response.defer()
     
-    feeds = get_db_dict("feeds")
+    current_feeds = db_load("feeds")
     sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
 
-    if sub_clean in feeds:
+    if sub_clean in current_feeds:
         return await interaction.followup.send(f"❌ Error: r/{sub_clean} is already in the list.")
 
-    # Veriyi doğrudan DB'ye yaz
-    feeds[sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
-    set_db_dict("feeds", feeds)
+    # Listeye ekle ve ANINDA veritabanına bas
+    current_feeds[sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
+    db_save("feeds", current_feeds)
 
     await interaction.followup.send(f"✅ Success: r/{sub_clean} added to {channel.mention}.")
 
 @client.tree.command(name="remove_feed", description="Remove a subreddit feed")
 @app_commands.default_permissions(administrator=True)
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
-    feeds = get_db_dict("feeds")
-    lp = get_db_dict("last_posts")
+    current_feeds = db_load("feeds")
+    current_lp = db_load("last_posts")
     sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
     
-    if sub_clean in feeds:
-        del feeds[sub_clean]
-        if sub_clean in lp: del lp[sub_clean]
-        set_db_dict("feeds", feeds)
-        set_db_dict("last_posts", lp)
+    if sub_clean in current_feeds:
+        del current_feeds[sub_clean]
+        if sub_clean in current_lp: del current_lp[sub_clean]
+        
+        db_save("feeds", current_feeds)
+        db_save("last_posts", current_lp)
         await interaction.response.send_message(f"🗑️ Removed: r/{sub_clean}")
     else:
         await interaction.response.send_message(f"❌ Error: r/{sub_clean} not found.")
 
 @client.tree.command(name="feed_list", description="Show all active feeds")
 async def feed_list(interaction: discord.Interaction):
-    feeds = get_db_dict("feeds")
-    if not feeds:
+    # Doğrudan DB'den en güncel halini oku
+    current_feeds = db_load("feeds")
+    
+    if not current_feeds:
         return await interaction.response.send_message("📋 The list is empty.")
     
-    msg = "\n".join([f"• **r/{k}** -> <#{v[1]}>" for k, v in feeds.items()])
+    msg = "\n".join([f"• **r/{k}** -> <#{v[1]}>" for k, v in current_feeds.items()])
     await interaction.response.send_message(f"📋 **Active Feeds:**\n{msg}")
 
 # --- AUTO LOOP ---
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
-        feeds = get_db_dict("feeds")
-        lp = get_db_dict("last_posts")
+        # Döngü başında her seferinde DB'den taze veriyi çek
+        current_feeds = db_load("feeds")
+        current_lp = db_load("last_posts")
         
-        for name, (url, ch_id) in list(feeds.items()):
+        for name, (url, ch_id) in list(current_feeds.items()):
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, timeout=10) as resp:
@@ -100,9 +102,9 @@ async def check_feeds():
                             f = feedparser.parse(await resp.read())
                             if f and f.entries:
                                 link = f.entries[0].link.split('?')[0].rstrip('/')
-                                if lp.get(name) != link:
-                                    lp[name] = link
-                                    set_db_dict("last_posts", lp) # DB Güncelle
+                                if current_lp.get(name) != link:
+                                    current_lp[name] = link
+                                    db_save("last_posts", current_lp) # DB Güncelle
                                     
                                     chan = client.get_channel(ch_id)
                                     if isinstance(chan, discord.abc.Messageable):
