@@ -51,7 +51,7 @@ client = MyBot()
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
     current_data = get_data()
-    
+
     if sub_clean in current_data["feeds"]:
         return await interaction.response.send_message(f"❌ r/{sub_clean} is already in the list.")
 
@@ -72,7 +72,7 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, channel: di
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
     current_data = get_data()
-    
+
     if sub_clean in current_data["feeds"]:
         del current_data["feeds"][sub_clean]
         current_data["last_posts"].pop(sub_clean, None)
@@ -87,9 +87,9 @@ async def remove_feed(interaction: discord.Interaction, subreddit: str):
 async def send_manual(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
     url = f"https://www.reddit.com/r/{sub_clean}/new/.rss"
-    
+
     await interaction.response.defer() # Reddit yanıtı gecikebilir
-    
+
     try:
         headers = {'User-Agent': 'Mozilla/5.0 RedditNotifier/1.0'}
         async with aiohttp.ClientSession(headers=headers) as session:
@@ -100,11 +100,16 @@ async def send_manual(interaction: discord.Interaction, subreddit: str, channel:
                         link = f.entries[0].link.split('?')[0].rstrip('/')
                         # NSFW KONTROLÜ
                         is_nsfw_post = any(t.get('term', '').lower() == 'nsfw' for t in f.entries[0].get('tags', []))
-                        if is_nsfw_post and hasattr(channel, "nsfw") and not channel.nsfw:
-                            return await interaction.followup.send("❌ Cannot send NSFW post to a non-NSFW channel.")
-                        
-                        await channel.send(content=link.replace("reddit.com", "rxddit.com"))
-                        await interaction.followup.send(f"🚀 Sent latest post from r/{sub_clean} to <#{channel.id}>")
+
+                        # FIX: GuildChannel nesnesini Messageable kontrolünden geçirerek send metodunu kullanıyoruz
+                        if isinstance(channel, discord.abc.Messageable):
+                            if is_nsfw_post and hasattr(channel, "nsfw") and not channel.nsfw:
+                                return await interaction.followup.send("❌ Cannot send NSFW post to a non-NSFW channel.")
+
+                            await channel.send(content=link.replace("reddit.com", "rxddit.com"))
+                            await interaction.followup.send(f"🚀 Sent latest post from r/{sub_clean} to <#{channel.id}>")
+                        else:
+                            await interaction.followup.send("❌ This channel is not a text-based channel.")
                     else:
                         await interaction.followup.send("❌ No posts found.")
                 else:
@@ -140,7 +145,7 @@ async def check_feeds():
 
                                 if last_link != raw_link:
                                     chan = client.get_channel(ch_id)
-                                    
+
                                     # NSFW KONTROLÜ (Otomatik döngüde)
                                     is_nsfw = any(t.get('term', '').lower() == 'nsfw' for t in f.entries[0].get('tags', []))
                                     if is_nsfw and hasattr(chan, "nsfw") and not chan.nsfw:
@@ -152,7 +157,7 @@ async def check_feeds():
 
                                     fresh_db["last_posts"][name] = raw_link
                                     save_data(fresh_db)
-                                    
+
                                     if isinstance(chan, discord.abc.Messageable):
                                         print(f"✅ New post sent: r/{name} -> {raw_link}")
                                         await chan.send(content=raw_link.replace("reddit.com", "rxddit.com"))
