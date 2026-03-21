@@ -60,7 +60,7 @@ async def send(interaction: discord.Interaction, link: str):
 async def status(interaction: discord.Interaction):
     # Latency değerini doğrudan client üzerinden çekiyoruz
     ping = round(client.latency * 1000)
-    await interaction.response.send_message(f"✅ **Sistem Aktif** | Gecikme: `{ping}ms`", ephemeral=True)
+    await interaction.response.send_message(f"✅ **Bot is on** | Latency: `{ping}ms`", ephemeral=True)
 
 # --- OTOMATİK FEED KONTROLÜ ---
 
@@ -71,11 +71,11 @@ async def check_feeds():
             try:
                 loop = asyncio.get_event_loop()
                 f = await loop.run_in_executor(None, lambda: feedparser.parse(url))
-                
+
                 if f and f.entries:
                     post = f.entries[0]
                     raw_post_link = post.link.split('?')[0].rstrip('/')
-                    
+
                     if last_posts.get(name) != raw_post_link:
                         last_posts[name] = raw_post_link
                         with open("last_posts.json", "w") as j: 
