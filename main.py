@@ -1,5 +1,5 @@
 import discord
-from discord import app_commands, TextChannel
+from discord import app_commands
 import asyncio
 import os
 import json
@@ -9,41 +9,18 @@ from aiohttp import web
 from replit import db 
 
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
+
 lock = asyncio.Lock()
 
-# --- DB fonksiyonları ---
 def get_data():
     if "reddit_notifier_db" not in db:
         db["reddit_notifier_db"] = json.dumps({"feeds": {}, "last_posts": {}})
-    try:
-        data = json.loads(db["reddit_notifier_db"])
-        if not isinstance(data.get("feeds"), dict):
-            data["feeds"] = {}
-        if not isinstance(data.get("last_posts"), dict):
-            data["last_posts"] = {}
-    except:
-        data = {"feeds": {}, "last_posts": {}}
-        db["reddit_notifier_db"] = json.dumps(data)
-    return data
+    return json.loads(db["reddit_notifier_db"])
 
 def save_data(new_data):
     db["reddit_notifier_db"] = json.dumps(new_data)
 
-# --- NSFW kontrol ---
-async def check_subreddit_nsfw(sub_name):
-    url = f"https://www.reddit.com/r/{sub_name}/about.json"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get("data", {}).get("over_18", False)
-                return True
-    except:
-        return True
-
-# --- AUTOCOMPLETE ---
+# AUTOCOMPLETE
 async def subreddit_autocomplete(interaction: discord.Interaction, current: str):
     current_data = get_data()
     feeds = current_data.get("feeds", {})
@@ -52,7 +29,6 @@ async def subreddit_autocomplete(interaction: discord.Interaction, current: str)
         for sub in feeds.keys() if current.lower() in sub.lower()
     ][:25]
 
-# --- BOT CLASS ---
 class MyBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -70,90 +46,64 @@ class MyBot(discord.Client):
 
 client = MyBot()
 
-# --- /add_feed ---
+# --- Feed commands ---
 @client.tree.command(name="add_feed", description="Add a new subreddit")
 @app_commands.default_permissions(administrator=True)
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
-    data = get_data()
+    current_data = get_data()
+    if sub_clean in current_data["feeds"]:
+        return await interaction.response.send_message(f"❌ r/{sub_clean} is already in the list.")
+    current_data["feeds"][sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
+    save_data(current_data)
+    await interaction.response.send_message(f"✅ Success: r/{sub_clean} added.")
 
-    # NSFW kontrol (sadece TextChannel için)
-    is_nsfw = await check_subreddit_nsfw(sub_clean)
-    if is_nsfw and (not isinstance(channel, TextChannel) or not channel.is_nsfw()):
-        return await interaction.response.send_message(
-            f"❌ Cannot add r/{sub_clean}: NSFW subreddit cannot be added to a non-NSFW channel.", ephemeral=True
-        )
-
-    if sub_clean in data["feeds"]:
-        return await interaction.response.send_message(f"❌ r/{sub_clean} already exists.", ephemeral=True)
-
-    data["feeds"][sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
-    save_data(data)
-    await interaction.response.send_message(f"✅ Added r/{sub_clean}", ephemeral=True)
-
-# --- /remove_feed ---
 @client.tree.command(name="remove_feed", description="Remove a subreddit")
 @app_commands.default_permissions(administrator=True)
 @app_commands.autocomplete(subreddit=subreddit_autocomplete)
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
-    data = get_data()
-
-    if sub_clean in data["feeds"]:
-        del data["feeds"][sub_clean]
-        data["last_posts"].pop(sub_clean, None)
-        save_data(data)
-
-        # Güncel listeyi göster
-        if data["feeds"]:
-            items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in data["feeds"].items()]
-            msg = f"🗑️ Deleted: r/{sub_clean}\n\n📋 Current feeds:\n" + "\n".join(items)
-        else:
-            msg = f"🗑️ Deleted: r/{sub_clean}\n\n📋 List is now empty."
-
-        await interaction.response.send_message(msg, ephemeral=False)
+    current_data = get_data()
+    if sub_clean in current_data["feeds"]:
+        del current_data["feeds"][sub_clean]
+        current_data["last_posts"].pop(sub_clean, None)
+        save_data(current_data)
+        await interaction.response.send_message(f"🗑️ Deleted: r/{sub_clean}")
     else:
-        await interaction.response.send_message(f"❌ r/{sub_clean} not found.", ephemeral=False)
+        await interaction.response.send_message(f"❌ r/{sub_clean} not found.")
 
-# --- /feed_list ---
-@client.tree.command(name="feed_list", description="Show all feeds")
+@client.tree.command(name="feed_list", description="Show the list")
 async def feed_list(interaction: discord.Interaction):
-    data = get_data()
-    feeds = data.get("feeds", {})
-    if not feeds:
-        return await interaction.response.send_message("📋 List empty.", ephemeral=True)
-    items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in feeds.items()]
+    current_data = get_data()
+    if not current_data["feeds"]:
+        return await interaction.response.send_message("📋 List empty.")
+    items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in current_data["feeds"].items()]
     await interaction.response.send_message(f"📋 **Feeds:**\n" + "\n".join(items))
 
-# --- /send ---
-@client.tree.command(name="send", description="Send a Reddit post to this channel")
+# --- /send command (komutu yazdığın kanala gönderir) ---
+@client.tree.command(
+    name="send",
+    description="Send a specific Reddit post to the current Discord channel"
+)
 @app_commands.default_permissions(administrator=True)
 async def send(interaction: discord.Interaction, reddit_link: str):
     chan = interaction.channel
-    if not isinstance(chan, TextChannel):
-        return await interaction.response.send_message("❌ Cannot send to this channel.", ephemeral=True)
-
-    # Subreddit adını al
-    try:
-        sub_name = reddit_link.split("/r/")[1].split("/")[0].lower()
-    except IndexError:
-        return await interaction.response.send_message("❌ Invalid Reddit link format.", ephemeral=True)
-
-    is_nsfw = await check_subreddit_nsfw(sub_name)
-    if is_nsfw and not chan.is_nsfw():
+    if not isinstance(chan, discord.abc.Messageable):
         return await interaction.response.send_message(
-            "❌ NSFW subreddit cannot be sent to a non-NSFW channel.", ephemeral=True
+            "❌ Cannot send to this channel.", ephemeral=True
         )
-
     cleaned_link = reddit_link.replace("reddit.com", "rxddit.com")
     await chan.send(content=cleaned_link)
+    await interaction.response.send_message(
+        f"✅ Link sent to this channel!", ephemeral=True
+    )
 
 # --- Feed loop ---
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
-        data = get_data()
-        feeds = data.get("feeds", {})
+        current_db = get_data()
+        feeds = current_db.get("feeds", {})
         for name, (url, ch_id) in list(feeds.items()):
             try:
                 headers = {'User-Agent': 'Mozilla/5.0 RedditNotifier/1.0'}
@@ -166,14 +116,14 @@ async def check_feeds():
                                 entry = f.entries[0]
                                 entry_id = entry.id
                                 async with lock:
-                                    fresh_data = get_data()
-                                    last_id = fresh_data["last_posts"].get(name, "")
+                                    fresh_db = get_data()
+                                    last_id = fresh_db["last_posts"].get(name, "")
                                     if last_id != entry_id:
-                                        fresh_data["last_posts"][name] = entry_id
-                                        save_data(fresh_data)
+                                        fresh_db["last_posts"][name] = entry_id
+                                        save_data(fresh_db)
                                         chan = client.get_channel(ch_id)
-                                        if isinstance(chan, TextChannel):
-                                            print(f"✅ Sent r/{name}")
+                                        if isinstance(chan, discord.abc.Messageable):
+                                            print(f"✅ Sent: r/{name}")
                                             await chan.send(content=entry.link.replace("reddit.com", "rxddit.com"))
                                         await asyncio.sleep(1)
             except Exception as e:
