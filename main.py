@@ -152,18 +152,23 @@ async def check_feeds():
                                 
                                 if fresh_db["last_posts"].get(name) != post_link:
                                     channel = client.get_channel(channel_id)
-                                    if channel and isinstance(channel, discord.abc.Messageable):
-                                        is_chan_nsfw = getattr(channel, 'nsfw', False)
+                                if channel and isinstance(channel, discord.abc.Messageable):
+                                    is_chan_nsfw = getattr(channel, 'nsfw', False)
+                    
+                                    # Feed içeriğinde 'nsfw' veya 'over_18' ibaresini daha geniş tarıyoruz
+                                    entry_str = str(f.entries[0]).lower()
+                                    is_post_nsfw = "over_18" in entry_str or "nsfw" in entry_str
+                                    
+                                    if is_post_nsfw and not is_chan_nsfw:
+                                        print(f"⏩ Skipped NSFW post for r/{name} (Channel not NSFW)")
+                                        continue
+                                    # ----------------------------------
                                         
-                                        # Döngü içi NSFW kontrolü
-                                        if "over_18" in str(f.entries[0]) and not is_chan_nsfw:
-                                            continue
-                                            
-                                        fresh_db["last_posts"][name] = post_link
-                                        save_data(fresh_db)
-                                        
-                                        fixed_link = post_link.replace("reddit.com", "rxddit.com").replace("www.", "")
-                                        await channel.send(content=fixed_link)
+                                    fresh_db["last_posts"][name] = post_link
+                                    save_data(fresh_db)
+                                    
+                                    fixed_link = post_link.replace("reddit.com", "rxddit.com").replace("www.", "")
+                                    await channel.send(content=fixed_link)
                 
                 await asyncio.sleep(2)
             except: pass
