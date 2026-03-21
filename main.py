@@ -84,6 +84,7 @@ async def feed_list(interaction: discord.Interaction):
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
+        # Her döngü başında güncel listeyi çek
         current_db = get_data()
         feeds = current_db.get("feeds", {})
 
@@ -97,48 +98,40 @@ async def check_feeds():
                             f = feedparser.parse(content)
                             
                             if f.entries:
-                                # ──── Minimal ama etkili temizlik ────
-                                raw_link = f.entries[0].link
+                                # LİNK TEMİZLİĞİ: Küçük harf yap, parametreleri at, son slash'ı sil
+                                raw_link = f.entries[0].link.split('?')[0].rstrip('/').lower()
                                 
-                                # 1. Query parametrelerini kesinlikle at (utm_source vs çok yaygın)
-                                raw_link = raw_link.split('?')[0]
-                                
-                                # 2. Sondaki slash'ı temizle (bazen var bazen yok)
-                                raw_link = raw_link.rstrip('/')
-                                
-                                # 3. SADECE www. varsa kaldır (old. dokunmuyoruz)
-                                if raw_link.startswith("https://www.reddit.com"):
-                                    raw_link = raw_link.replace("https://www.reddit.com", "https://reddit.com", 1)
-                                
-                                # Lower yapmıyoruz artık — orijinal haliyle tutuyoruz
-                                
+                                # VERİTABANINDAN ANLIK KONTROL (Cache yerine direkt DB)
                                 fresh_db = get_data()
-                                last_link = fresh_db["last_posts"].get(name, "")
-                                
+                                last_link = fresh_db["last_posts"].get(name, "").lower()
+
                                 if last_link != raw_link:
+                                    # ÖNEMLİ: Önce DB'yi güncelle ki mesaj gitmeden "gönderildi" sayılsın
                                     fresh_db["last_posts"][name] = raw_link
                                     save_data(fresh_db)
                                     
                                     chan = client.get_channel(ch_id)
                                     if isinstance(chan, discord.abc.Messageable):
-                                        print(f"✅ New post sent: r/{name} → {raw_link}")
-                                        # Göndereceğimiz linkte rxddit değişikliğini koruyoruz
-                                        sendable = raw_link.replace("reddit.com", "rxddit.com")
-                                        await chan.send(content=sendable)
+                                        # Paylaş ve konsola yaz
+                                        print(f"✅ New post sent: r/{name} -> {raw_link}")
+                                        await chan.send(content=raw_link.replace("reddit.com", "rxddit.com"))
                                     
-                                    await asyncio.sleep(60)
+                                    # DB'nin senkronize olması için kısa bir es
+                                    await asyncio.sleep(1)
+            except Exception as e:
+                print(f"⚠️ Loop Error for r/{name}: {e}")
+            
+            # Subredditler arası kısa bekleme (Replit DB hız sınırı için)
+            await asyncio.sleep(2)
+        await asyncio.sleep(60)
 
 async def main():
     app = web.Application()
     app.router.add_get("/", lambda r: web.Response(text="Bot Online"))
     runner = web.AppRunner(app)
     await runner.setup()
-    
-    try:
-        await web.TCPSite(runner, "0.0.0.0", 8080).start()
-    except Exception:
-        pass  # Replit'te bazen port zaten alınmış oluyor, görmezden gel
-    
+    try: await web.TCPSite(runner, "0.0.0.0", 8080).start()
+    except: pass
     if TOKEN:
         async with client:
             client.loop.create_task(check_feeds())
