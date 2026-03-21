@@ -13,7 +13,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FEEDS_FILE = os.path.join(BASE_DIR, "feeds.json")
 LAST_POSTS_FILE = os.path.join(BASE_DIR, "last_posts.json")
 
-TOKEN = os.environ["TOKEN"]
+TOKEN = os.environ["DISCORD_TOKEN"]
 
 # --- VERİ YÖNETİMİ (KESİN ÇÖZÜM) ---
 def load_data(filename):
