@@ -89,6 +89,36 @@ async def feed_list(interaction: discord.Interaction):
     await interaction.response.send_message(f"📋 **Feeds:**\n" + "\n".join(items))
 
 
+# --- YENİ KOMUT: /send ---
+@client.tree.command(
+    name="send",
+    description="Send a specific Reddit post to a Discord channel"
+)
+@app_commands.default_permissions(administrator=True)
+async def send_post(
+    interaction: discord.Interaction,
+    reddit_link: str,
+    channel: discord.abc.GuildChannel = None  # opsiyonel kanal
+):
+    # Kanal belirtilmemişse komutu yazdığı kanala gönder
+    target_channel = channel or interaction.channel
+
+    if not isinstance(target_channel, discord.abc.Messageable):
+        return await interaction.response.send_message("❌ Cannot send to this channel.", ephemeral=True)
+
+    # Linki basit temizleme
+    cleaned_link = reddit_link.replace("reddit.com", "rxddit.com")
+
+    # Mesajı gönder
+    await target_channel.send(content=cleaned_link)
+
+    # Kullanıcıya geri bildirim
+    await interaction.response.send_message(
+        f"✅ Link sent to <#{target_channel.id}>!",
+        ephemeral=True
+    )
+
+
 async def check_feeds():
     await client.wait_until_ready()
 
@@ -108,9 +138,9 @@ async def check_feeds():
 
                             if f.entries:
                                 entry = f.entries[0]
-                                entry_id = entry.id  # 🔥 KRİTİK FIX
+                                entry_id = entry.id  # KRİTİK FIX
 
-                                async with lock:  # 🔒 RACE CONDITION FIX
+                                async with lock:  # RACE CONDITION FIX
                                     fresh_db = get_data()
                                     last_id = fresh_db["last_posts"].get(name, "")
 
