@@ -87,24 +87,16 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, channel: di
 @app_commands.default_permissions(administrator=True)
 @app_commands.autocomplete(subreddit=subreddit_autocomplete)
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
-    sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
+    sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
     current_data = get_data()
     
     if sub_clean in current_data["feeds"]:
         del current_data["feeds"][sub_clean]
         current_data["last_posts"].pop(sub_clean, None)
         save_data(current_data)
-
-        # Güncel listeyi göster
-        if current_data["feeds"]:
-            items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in current_data["feeds"].items()]
-            msg = f"🗑️ Deleted: r/{sub_clean}\n\n📋 **Current Feeds:**\n" + "\n".join(items)
-        else:
-            msg = f"🗑️ Deleted: r/{sub_clean}\n\n📋 List is now empty."
-        
-        await interaction.response.send_message(msg, ephemeral=False)
+        await interaction.response.send_message(f"🗑️ **r/{sub_clean}** removed.")
     else:
-        await interaction.response.send_message(f"❌ r/{sub_clean} not found.", ephemeral=False)
+        await interaction.response.send_message("❌ Subreddit not found.")
 
 @client.tree.command(name="feed_list", description="Show the list")
 async def feed_list(interaction: discord.Interaction):
