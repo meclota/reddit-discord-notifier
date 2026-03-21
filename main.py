@@ -1,5 +1,3 @@
-#test to see
-
 import discord
 from discord import app_commands
 import asyncio
@@ -7,10 +5,12 @@ import os
 import json
 import feedparser
 import aiohttp
+import time
 from aiohttp import web
 from replit import db 
 
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
+nsfw_cache = {} # NSFW durumlarını geçici hafızada tutmak için
 
 def get_data():
     if "reddit_notifier_db" not in db:
@@ -20,7 +20,27 @@ def get_data():
 def save_data(new_data):
     db["reddit_notifier_db"] = json.dumps(new_data)
 
-# --- AUTOCOMPLETE FUNCTION (MUST BE DEFINED BEFORE THE COMMAND) ---
+# --- SMART NSFW CHECKER ---
+async def check_subreddit_nsfw(sub_name):
+    current_time = time.time()
+    if sub_name in nsfw_cache:
+        val, timestamp = nsfw_cache[sub_name]
+        if current_time - timestamp < 86400: return val
+
+    url = f"https://www.reddit.com/r/{sub_name}/about.json"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    is_nsfw = data.get("data", {}).get("over_18", False)
+                    nsfw_cache[sub_name] = (is_nsfw, current_time)
+                    return is_nsfw
+                return True # Erişilemiyorsa güvenlik için True
+    except: return True
+
+# --- AUTOCOMPLETE FUNCTION ---
 async def subreddit_autocomplete(
     interaction: discord.Interaction,
     current: str,
@@ -49,15 +69,28 @@ client = MyBot()
 @client.tree.command(name="add_feed", description="Add a new subreddit")
 @app_commands.default_permissions(administrator=True)
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
+    await interaction.response.defer(ephemeral=True)
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
     current_data = get_data()
+    
     if sub_clean in current_data["feeds"]:
-        return await interaction.response.send_message(f"❌ r/{sub_clean} is already in the list.")
+        return await interaction.followup.send(f"❌ r/{sub_clean} is already in the list.", ephemeral=True)
+
+    # NSFW KONTROLÜ
+    is_sub_nsfw = await check_subreddit_nsfw(sub_clean)
+    is_channel_nsfw = getattr(channel, 'nsfw', False)
+    
+    if is_sub_nsfw and not is_channel_nsfw:
+        return await interaction.followup.send(f"❌ Error: r/{sub_clean} is NSFW, but {channel.mention} is not Age-Restricted.", ephemeral=True)
+
     current_data["feeds"][sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
     save_data(current_data)
-    await interaction.response.send_message(f"✅ Success: r/{sub_clean} added to cloud storage.")
+    
+    await interaction.followup.send(f"✅ Success: r/{sub_clean} added to cloud storage.", ephemeral=True)
+    
+    if isinstance(channel, discord.abc.Messageable):
+        await channel.send(f"📢 **System:** r/{sub_clean} linked. (NSFW: {'YES' if is_sub_nsfw else 'NO'})")
 
-# --- REMOVE COMMAND WITH AUTOCOMPLETE ---
 @client.tree.command(name="remove_feed", description="Remove a subreddit")
 @app_commands.default_permissions(administrator=True)
 @app_commands.autocomplete(subreddit=subreddit_autocomplete)
@@ -73,12 +106,30 @@ async def remove_feed(interaction: discord.Interaction, subreddit: str):
     else:
         await interaction.response.send_message(f"❌ Error: r/{sub_clean} not found.")
 
-# --- SEND COMMAND (LINK BASED) ---
-@client.tree.command(name="send", description="Send a reddit link with rxddit conversion")
-@app_commands.default_permissions(administrator=True)
+@client.tree.command(name="send", description="Convert link with Strict NSFW Protection")
 async def send(interaction: discord.Interaction, link: str):
-    processed_link = link.replace("reddit.com", "rxddit.com")
-    await interaction.response.send_message(content=processed_link)
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        if "/r/" not in link:
+            return await interaction.followup.send("❌ Not a valid Reddit link.", ephemeral=True)
+        
+        sub_name = link.split("/r/")[1].split("/")[0].lower()
+        is_link_nsfw = await check_subreddit_nsfw(sub_name)
+        is_channel_nsfw = getattr(interaction.channel, 'nsfw', False)
+        
+        if is_link_nsfw and not is_channel_nsfw:
+            return await interaction.followup.send("❌ This is an NSFW link and this channel is not Age-Restricted.", ephemeral=True)
+            
+        if not isinstance(interaction.channel, discord.abc.Messageable):
+            return await interaction.followup.send("❌ Cannot send messages here.", ephemeral=True)
+
+        fixed = link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
+        await interaction.channel.send(content=f"{interaction.user.mention}: {fixed}")
+        await interaction.followup.send("✅ Sent!", ephemeral=True)
+
+    except:
+        await interaction.followup.send("❌ Error checking link.", ephemeral=True)
 
 @client.tree.command(name="feed_list", description="Show the list")
 async def feed_list(interaction: discord.Interaction):
@@ -91,7 +142,6 @@ async def feed_list(interaction: discord.Interaction):
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
-        # Her döngü başında güncel listeyi çek
         current_db = get_data()
         feeds = current_db.get("feeds", {})
 
@@ -105,30 +155,21 @@ async def check_feeds():
                             f = feedparser.parse(content)
                             
                             if f.entries:
-                                # LİNK TEMİZLİĞİ: Küçük harf yap, parametreleri at, son slash'ı sil
                                 raw_link = f.entries[0].link.split('?')[0].rstrip('/').lower()
-                                
-                                # VERİTABANINDAN ANLIK KONTROL (Cache yerine direkt DB)
                                 fresh_db = get_data()
                                 last_link = fresh_db["last_posts"].get(name, "").lower()
 
                                 if last_link != raw_link:
-                                    # ÖNEMLİ: Önce DB'yi güncelle ki mesaj gitmeden "gönderildi" sayılsın
                                     fresh_db["last_posts"][name] = raw_link
                                     save_data(fresh_db)
                                     
                                     chan = client.get_channel(ch_id)
                                     if isinstance(chan, discord.abc.Messageable):
-                                        # Paylaş ve konsola yaz
                                         print(f"✅ New post sent: r/{name} -> {raw_link}")
                                         await chan.send(content=raw_link.replace("reddit.com", "rxddit.com"))
-                                    
-                                    # DB'nin senkronize olması için kısa bir es
                                     await asyncio.sleep(1)
             except Exception as e:
                 print(f"⚠️ Loop Error for r/{name}: {e}")
-            
-            # Subredditler arası kısa bekleme (Replit DB hız sınırı için)
             await asyncio.sleep(2)
         await asyncio.sleep(60)
 
