@@ -41,7 +41,6 @@ class MyBot(discord.Client):
         await self.tree.sync()
 
     async def on_ready(self):
-        # self.user'ın None olmadığını kontrol ediyoruz
         if self.user:
             print('------')
             print(f'Logged in as {self.user.name} (ID: {self.user.id})')
@@ -53,13 +52,15 @@ client = MyBot()
 
 @client.tree.command(name="send", description="Reddit linkini rxddit olarak paylaşır")
 async def send(interaction: discord.Interaction, link: str):
+    # En sade hali: Sadece link dönüşümü ve gönderim
     fixed_link = link.replace("reddit.com", "rxddit.com").replace("www.", "")
     await interaction.response.send_message(content=fixed_link)
 
 @client.tree.command(name="status", description="Bot durumunu kontrol et")
 async def status(interaction: discord.Interaction):
+    # Latency değerini doğrudan client üzerinden çekiyoruz
     ping = round(client.latency * 1000)
-    await interaction.response.send_message(f"**Latency** | `{ping}ms`", ephemeral=True)
+    await interaction.response.send_message(f"✅ **Sistem Aktif** | Gecikme: `{ping}ms`", ephemeral=True)
 
 # --- OTOMATİK FEED KONTROLÜ ---
 
@@ -70,12 +71,11 @@ async def check_feeds():
             try:
                 loop = asyncio.get_event_loop()
                 f = await loop.run_in_executor(None, lambda: feedparser.parse(url))
-
+                
                 if f and f.entries:
                     post = f.entries[0]
-                    # Linki temizleyerek karşılaştır (Çift atmayı önleyen kısım)
                     raw_post_link = post.link.split('?')[0].rstrip('/')
-
+                    
                     if last_posts.get(name) != raw_post_link:
                         last_posts[name] = raw_post_link
                         with open("last_posts.json", "w") as j: 
@@ -83,12 +83,10 @@ async def check_feeds():
 
                         channel = client.get_channel(channel_id)
                         if isinstance(channel, discord.abc.Messageable):
-                            # Sadece GÖNDERİRKEN rxddit'e çeviriyoruz
                             fixed_rss_link = raw_post_link.replace("reddit.com", "rxddit.com").replace("www.", "")
                             await channel.send(content=fixed_rss_link)
             except:
                 pass
-
         await asyncio.sleep(60)
 
 # --- WEB SERVER ---
