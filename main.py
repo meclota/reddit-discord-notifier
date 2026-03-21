@@ -13,31 +13,33 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FEEDS_FILE = os.path.join(BASE_DIR, "feeds.json")
 LAST_POSTS_FILE = os.path.join(BASE_DIR, "last_posts.json")
 
+# Token değişkenini DISCORD_TOKEN olarak güncelledik
 TOKEN = os.environ["DISCORD_TOKEN"]
 
-# --- VERİ YÖNETİMİ (KESİN ÇÖZÜM) ---
+# --- VERİ YÖNETİMİ ---
 def load_data(filename):
     if not os.path.exists(filename):
-        with open(filename, "w") as f:
-            json.dump({}, f)
-        return {}
+        try:
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump({}, f)
+            return {}
+        except: return {}
     try:
         with open(filename, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            content = f.read()
+            if not content: return {}
+            data = json.loads(content)
             return data if isinstance(data, dict) else {}
     except:
         return {}
 
 def save_data(filename, data):
     try:
-        # Önce veriyi bir string'e çeviriyoruz (hata var mı kontrolü)
         json_content = json.dumps(data, indent=4)
-        
-        # Dosyayı açıp üzerine yazıyoruz
         with open(filename, "w", encoding="utf-8") as f:
             f.write(json_content)
             f.flush()
-            os.fsync(f.fileno()) # İşletim sistemini yazmaya zorlar
+            os.fsync(f.fileno())
         print(f"✅ SUCCESS: Saved to {os.path.basename(filename)}")
     except Exception as e:
         print(f"❌ ERROR saving {filename}: {e}")
@@ -58,7 +60,8 @@ class MyBot(discord.Client):
         await self.tree.sync()
 
     async def on_ready(self):
-        print(f'Logged in as {self.user.name if self.user else "Bot"}')
+        name = self.user.name if self.user else "Bot"
+        print(f'------\nLogged in as {name}\n------')
 
 client = MyBot()
 
@@ -91,45 +94,57 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, kanal: disc
     sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
     
     if sub_clean in feeds:
-        return await interaction.followup.send(f"❌ Already tracked.", ephemeral=True)
+        return await interaction.followup.send(f"❌ r/{sub_clean} is already tracked.", ephemeral=True)
 
     is_sub_nsfw = await check_subreddit_nsfw(sub_clean)
     is_channel_nsfw = getattr(kanal, 'nsfw', False)
     
     if is_sub_nsfw and not is_channel_nsfw:
-        return await interaction.followup.send(f"❌ NSFW mismatch.", ephemeral=True)
+        return await interaction.followup.send(f"❌ Error: r/{sub_clean} is NSFW, but {kanal.mention} is not.", ephemeral=True)
     
-    # VERİYİ KAYDET
     feeds[sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", kanal.id]
-    save_data(FEEDS_FILE, feeds) # <--- BURASI ÇOK ÖNEMLİ
+    save_data(FEEDS_FILE, feeds)
     
     await interaction.followup.send(f"✅ Added r/{sub_clean}", ephemeral=True)
     if isinstance(kanal, discord.abc.Messageable):
-        await kanal.send(f"📢 Linked r/{sub_clean}")
+        await kanal.send(f"📢 Linked r/{sub_clean} (NSFW: {'YES' if is_sub_nsfw else 'NO'})")
 
-@client.tree.command(name="send", description="Convert link")
+@client.tree.command(name="remove_feed", description="Remove a tracked subreddit")
+@app_commands.default_permissions(administrator=True)
+async def remove_feed(interaction: discord.Interaction, subreddit: str):
+    sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
+    if sub_clean in feeds:
+        del feeds[sub_clean]
+        if sub_clean in last_posts: del last_posts[sub_clean]
+        save_data(FEEDS_FILE, feeds)
+        save_data(LAST_POSTS_FILE, last_posts)
+        await interaction.response.send_message(f"🗑️ r/{sub_clean} removed from tracking.")
+    else:
+        await interaction.response.send_message("❌ Subreddit not found in list.", ephemeral=True)
+
+@client.tree.command(name="send", description="Convert link with NSFW protection")
 async def send(interaction: discord.Interaction, link: str):
     await interaction.response.defer(ephemeral=True)
     try:
         sub_name = link.split("/r/")[1].split("/")[0].lower()
         is_link_nsfw = await check_subreddit_nsfw(sub_name)
         if is_link_nsfw and not getattr(interaction.channel, 'nsfw', False):
-            return await interaction.followup.send("❌ NSFW Error", ephemeral=True)
+            return await interaction.followup.send("❌ This is an NSFW link and this channel is not Age-Restricted.", ephemeral=True)
         
         if isinstance(interaction.channel, discord.abc.Messageable):
             fixed = link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
             await interaction.channel.send(content=f"{interaction.user.mention}: {fixed}")
             await interaction.followup.send("✅ Sent", ephemeral=True)
     except:
-        await interaction.followup.send("❌ Link Error", ephemeral=True)
+        await interaction.followup.send("❌ Link error or invalid format.", ephemeral=True)
 
-@client.tree.command(name="feed_list", description="Show feeds")
+@client.tree.command(name="feed_list", description="Show all active feeds")
 async def feed_list(interaction: discord.Interaction):
-    if not feeds: return await interaction.response.send_message("📋 List empty.")
-    msg = "\n".join([f"• r/{k} -> <#{v[1]}>" for k, v in feeds.items()])
-    await interaction.response.send_message(f"📋 **Feeds:**\n{msg}")
+    if not feeds: return await interaction.response.send_message("📋 Feed list is empty.")
+    msg = "\n".join([f"• **r/{k}** -> <#{v[1]}>" for k, v in feeds.items()])
+    await interaction.response.send_message(f"📋 **Active Reddit Feeds:**\n{msg}")
 
-# --- LOOP ---
+# --- AUTO FEED LOOP ---
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
@@ -141,7 +156,7 @@ async def check_feeds():
                     link = f.entries[0].link.split('?')[0].rstrip('/')
                     if last_posts.get(name) != link:
                         last_posts[name] = link
-                        save_data(LAST_POSTS_FILE, last_posts) # <--- KAYIT
+                        save_data(LAST_POSTS_FILE, last_posts)
                         
                         chan = client.get_channel(ch_id)
                         if chan and isinstance(chan, discord.abc.Messageable):
