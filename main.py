@@ -1,4 +1,4 @@
-#test
+#testing
 
 import discord
 from discord import app_commands
@@ -9,48 +9,13 @@ import os
 import aiohttp
 import time
 from aiohttp import web
+from replit import db  # Replit'in kendi veritabanı kütüphanesi
 
-# --- FILE PATHS ---
-# Replit'te verinin kalıcı olması için direkt dosya isimlerini kullanıyoruz
-FEEDS_FILE = "feeds.json"
-LAST_POSTS_FILE = "last_posts.json"
+# --- ENV VARIABLES ---
 TOKEN = os.environ.get("TOKEN")
 
-# Global variables to keep data in memory while bot is running
-feeds = {}
-last_posts = {}
+# Global variables for fast access (synced with DB)
 nsfw_cache = {}
-
-# --- DATA MANAGEMENT ---
-def load_all_data():
-    global feeds, last_posts
-    # Load Feeds
-    if os.path.exists(FEEDS_FILE):
-        try:
-            with open(FEEDS_FILE, "r", encoding="utf-8") as f:
-                feeds = json.load(f)
-        except: feeds = {}
-    else: feeds = {}
-
-    # Load Last Posts
-    if os.path.exists(LAST_POSTS_FILE):
-        try:
-            with open(LAST_POSTS_FILE, "r", encoding="utf-8") as f:
-                last_posts = json.load(f)
-        except: last_posts = {}
-    else: last_posts = {}
-
-def save_data(filename, data):
-    try:
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4)
-            f.flush()
-            # os.fsync(f.fileno()) # Bazı Replit sistemlerinde hata verebilir, gerekirse açılabilir
-    except Exception as e:
-        print(f"Error saving {filename}: {e}")
-
-# İlk açılışta verileri yükle
-load_all_data()
 
 class MyBot(discord.Client):
     def __init__(self):
@@ -63,11 +28,25 @@ class MyBot(discord.Client):
         await self.tree.sync()
 
     async def on_ready(self):
-        print(f'------\nLogged in as {self.user}\n------')
+        # Database initialize (if keys don't exist)
+        if "feeds" not in db:
+            db["feeds"] = "{}"
+        if "last_posts" not in db:
+            db["last_posts"] = "{}"
+        print(f'------\nLogged in as {self.user}\nDatabase Ready\n------')
 
 client = MyBot()
 
-# --- SMART NSFW CHECKER ---
+# --- HELPERS ---
+def get_db_dict(key):
+    try:
+        return json.loads(db[key])
+    except:
+        return {}
+
+def set_db_dict(key, data):
+    db[key] = json.dumps(data)
+
 async def check_subreddit_nsfw(sub_name):
     curr = time.time()
     if sub_name in nsfw_cache:
@@ -83,7 +62,7 @@ async def check_subreddit_nsfw(sub_name):
                     is_nsfw = data.get("data", {}).get("over_18", False)
                     nsfw_cache[sub_name] = (is_nsfw, curr)
                     return is_nsfw
-        return False # Default to False if check fails
+        return False
     except: return False
 
 # --- COMMANDS ---
@@ -93,6 +72,7 @@ async def check_subreddit_nsfw(sub_name):
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
     await interaction.response.defer(ephemeral=False)
     
+    feeds = get_db_dict("feeds")
     sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
 
     if sub_clean in feeds:
@@ -103,26 +83,29 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, channel: di
         return await interaction.followup.send(f"❌ Error: r/{sub_clean} is NSFW, but this channel is not age-restricted.")
 
     feeds[sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
-    save_data(FEEDS_FILE, feeds)
+    set_db_dict("feeds", feeds)
 
     await interaction.followup.send(f"✅ Success: r/{sub_clean} has been linked to {channel.mention}.")
 
 @client.tree.command(name="remove_feed", description="Remove a subreddit feed")
 @app_commands.default_permissions(administrator=True)
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
+    feeds = get_db_dict("feeds")
+    lp = get_db_dict("last_posts")
     sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
     
     if sub_clean in feeds:
         del feeds[sub_clean]
-        if sub_clean in last_posts: del last_posts[sub_clean]
-        save_data(FEEDS_FILE, feeds)
-        save_data(LAST_POSTS_FILE, last_posts)
+        if sub_clean in lp: del lp[sub_clean]
+        set_db_dict("feeds", feeds)
+        set_db_dict("last_posts", lp)
         await interaction.response.send_message(f"🗑️ Removed: r/{sub_clean} feed has been deleted.", ephemeral=False)
     else:
         await interaction.response.send_message(f"❌ Error: Subreddit 'r/{sub_clean}' not found in the list.", ephemeral=False)
 
 @client.tree.command(name="feed_list", description="Show all active subreddit feeds")
 async def feed_list(interaction: discord.Interaction):
+    feeds = get_db_dict("feeds")
     if not feeds: 
         return await interaction.response.send_message("📋 The feed list is currently empty.", ephemeral=False)
     
@@ -144,7 +127,9 @@ async def send(interaction: discord.Interaction, link: str):
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
-        # Döngüde feeds ve last_posts global değişkenlerini kullanıyoruz
+        feeds = get_db_dict("feeds")
+        lp = get_db_dict("last_posts")
+        
         for name, (url, ch_id) in list(feeds.items()):
             try:
                 async with aiohttp.ClientSession() as session:
@@ -154,9 +139,9 @@ async def check_feeds():
                             f = feedparser.parse(content)
                             if f and f.entries:
                                 link = f.entries[0].link.split('?')[0].rstrip('/')
-                                if last_posts.get(name) != link:
-                                    last_posts[name] = link
-                                    save_data(LAST_POSTS_FILE, last_posts)
+                                if lp.get(name) != link:
+                                    lp[name] = link
+                                    set_db_dict("last_posts", lp) # Save update to DB
                                     
                                     chan = client.get_channel(ch_id)
                                     if chan:
