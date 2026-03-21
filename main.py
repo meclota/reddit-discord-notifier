@@ -30,23 +30,23 @@ class MyBot(discord.Client):
         await self.tree.sync()
 
     async def on_ready(self):
-        print(f'------\nBot Aktif: {self.user}\n------')
+        print(f'------\nBot Online: {self.user}\n------')
 
 client = MyBot()
 
-@client.tree.command(name="add_feed", description="Yeni subreddit ekle")
+@client.tree.command(name="add_feed", description="Add a new subreddit")
 @app_commands.default_permissions(administrator=True)
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
     current_data = get_data()
     if sub_clean in current_data["feeds"]:
-        return await interaction.response.send_message(f"❌ r/{sub_clean} zaten listede.")
+        return await interaction.response.send_message(f"❌ r/{sub_clean} is already in the list.")
     current_data["feeds"][sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
     save_data(current_data)
-    await interaction.response.send_message(f"✅ Başarılı: r/{sub_clean} buluta eklendi.")
+    await interaction.response.send_message(f"✅ Success: r/{sub_clean} added to cloud storage.")
 
-# --- YENİ EKLENEN REMOVE KOMUTU ---
-@client.tree.command(name="remove_feed", description="Subreddit sil")
+# --- REMOVE COMMAND ---
+@client.tree.command(name="remove_feed", description="Remove a subreddit")
 @app_commands.default_permissions(administrator=True)
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
@@ -56,18 +56,18 @@ async def remove_feed(interaction: discord.Interaction, subreddit: str):
         del current_data["feeds"][sub_clean]
         current_data["last_posts"].pop(sub_clean, None)
         save_data(current_data)
-        await interaction.response.send_message(f"🗑️ Silindi: r/{sub_clean} buluttan kaldırıldı.")
+        await interaction.response.send_message(f"🗑️ Deleted: r/{sub_clean} removed from cloud.")
     else:
-        await interaction.response.send_message(f"❌ Hata: r/{sub_clean} bulunamadı.")
+        await interaction.response.send_message(f"❌ Error: r/{sub_clean} not found.")
 # ---------------------------------
 
-@client.tree.command(name="feed_list", description="Listeyi göster")
+@client.tree.command(name="feed_list", description="Show the list")
 async def feed_list(interaction: discord.Interaction):
     current_data = get_data()
     if not current_data["feeds"]:
-        return await interaction.response.send_message("📋 Liste şu an boş.")
+        return await interaction.response.send_message("📋 The list is currently empty.")
     items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in current_data["feeds"].items()]
-    await interaction.response.send_message(f"📋 **Aktif Listeler:**\n" + "\n".join(items))
+    await interaction.response.send_message(f"📋 **Active Feeds:**\n" + "\n".join(items))
 
 async def check_feeds():
     await client.wait_until_ready()
@@ -94,7 +94,7 @@ async def check_feeds():
 
 async def main():
     app = web.Application()
-    app.router.add_get("/", lambda r: web.Response(text="Bot Aktif"))
+    app.router.add_get("/", lambda r: web.Response(text="Bot Online"))
     runner = web.AppRunner(app)
     await runner.setup()
     try: await web.TCPSite(runner, "0.0.0.0", 8080).start()
