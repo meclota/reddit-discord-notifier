@@ -43,6 +43,22 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, channel: di
     save_data(current_data)
     await interaction.response.send_message(f"✅ Başarılı: r/{sub_clean} buluta eklendi.")
 
+# --- YENİ EKLENEN REMOVE KOMUTU ---
+@client.tree.command(name="remove_feed", description="Subreddit sil")
+@app_commands.default_permissions(administrator=True)
+async def remove_feed(interaction: discord.Interaction, subreddit: str):
+    sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
+    current_data = get_data()
+    
+    if sub_clean in current_data["feeds"]:
+        del current_data["feeds"][sub_clean]
+        current_data["last_posts"].pop(sub_clean, None)
+        save_data(current_data)
+        await interaction.response.send_message(f"🗑️ Silindi: r/{sub_clean} buluttan kaldırıldı.")
+    else:
+        await interaction.response.send_message(f"❌ Hata: r/{sub_clean} bulunamadı.")
+# ---------------------------------
+
 @client.tree.command(name="feed_list", description="Listeyi göster")
 async def feed_list(interaction: discord.Interaction):
     current_data = get_data()
