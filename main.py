@@ -15,42 +15,45 @@ feeds = {}
 last_posts = {}
 nsfw_cache = {}
 
-# --- DATABASE MANAGEMENT (ULTRA SAFE) ---
+# --- DATABASE MANAGEMENT (RE-ENGINEERED) ---
 def sync_from_db():
     global feeds, last_posts
     try:
-        # Replit DB'den ham veriyi al
-        f_data = db.get("feeds")
-        l_data = db.get("last_posts")
-        
-        # Eğer veri yoksa veya bozuksa boş sözlük ata
-        if f_data is None:
+        # Replit DB'den ham verileri çek ve temiz dict'e zorla
+        raw_feeds = db.get("feeds")
+        raw_lp = db.get("last_posts")
+
+        # Eğer DB'de anahtar yoksa veya None ise boş dict yap
+        if raw_feeds is None:
             db["feeds"] = "{}"
-            feeds = {}
+            feeds.clear()
         else:
-            feeds.update(json.loads(f_data) if isinstance(f_data, str) else dict(f_data))
-            
-        if l_data is None:
+            # Replit DB objesini JSON üzerinden standart dict'e çeviriyoruz
+            data = json.loads(raw_feeds) if isinstance(raw_feeds, str) else dict(raw_feeds)
+            feeds.clear()
+            feeds.update(data)
+
+        if raw_lp is None:
             db["last_posts"] = "{}"
-            last_posts = {}
+            last_posts.clear()
         else:
-            last_posts.update(json.loads(l_data) if isinstance(l_data, str) else dict(l_data))
+            data_lp = json.loads(raw_lp) if isinstance(raw_lp, str) else dict(raw_lp)
+            last_posts.clear()
+            last_posts.update(data_lp)
             
-        print(f"✅ Database Synced: {len(feeds)} feeds loaded.")
+        print(f"✅ DB Sync Complete: {len(feeds)} feeds in memory.")
     except Exception as e:
-        print(f"⚠️ Critical DB Error, resetting memory: {e}")
-        feeds = {}
-        last_posts = {}
+        print(f"⚠️ DB Sync Error: {e}")
 
 def save_to_db():
     try:
-        # Veriyi JSON string olarak kaydetmek en güvenli yoldur
+        # En güvenli yol: Veriyi JSON string olarak kaydetmek
         db["feeds"] = json.dumps(feeds)
         db["last_posts"] = json.dumps(last_posts)
     except Exception as e:
-        print(f"❌ DB Save Failed: {e}")
+        print(f"❌ DB Save Error: {e}")
 
-# Uygulama başında bir kez çalıştır
+# Başlangıç senkronizasyonu
 sync_from_db()
 
 class MyBot(discord.Client):
@@ -74,7 +77,6 @@ async def check_subreddit_nsfw(sub_name):
     if sub_name in nsfw_cache:
         val, ts = nsfw_cache[sub_name]
         if curr - ts < 86400: return val
-    
     url = f"https://www.reddit.com/r/{sub_name}/about.json"
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
@@ -88,7 +90,7 @@ async def check_subreddit_nsfw(sub_name):
         return False
     except: return False
 
-# --- COMMANDS (ALL ENGLISH & SYNCED) ---
+# --- COMMANDS ---
 
 @client.tree.command(name="add_feed", description="Add a new subreddit feed")
 @app_commands.default_permissions(administrator=True)
@@ -117,34 +119,24 @@ async def remove_feed(interaction: discord.Interaction, subreddit: str):
         save_to_db()
         await interaction.response.send_message(f"🗑️ Removed: r/{sub_clean}", ephemeral=False)
     else:
-        # DÜZELTİLDİ: "Bulunamadı" yerine İngilizce hata
-        await interaction.response.send_message(f"❌ Error: r/{sub_clean} not found in the list.", ephemeral=False)
+        await interaction.response.send_message(f"❌ Error: r/{sub_clean} not found.", ephemeral=False)
 
 @client.tree.command(name="feed_list", description="Show all active feeds")
 async def feed_list(interaction: discord.Interaction):
-    # Doğrudan RAM'deki güncel feeds değişkenini bas
+    # Bellekteki sözlüğü kontrol et
     if not feeds:
         return await interaction.response.send_message("📋 The list is empty.", ephemeral=False)
     
     msg = "\n".join([f"• **r/{k}** -> <#{v[1]}>" for k, v in feeds.items()])
     await interaction.response.send_message(f"📋 **Active Feeds:**\n{msg}", ephemeral=False)
 
-@client.tree.command(name="send", description="Convert link to rxddit")
-async def send(interaction: discord.Interaction, link: str):
-    try:
-        sub_name = link.split("/r/")[1].split("/")[0].lower()
-        if await check_subreddit_nsfw(sub_name) and not getattr(interaction.channel, 'nsfw', False):
-            return await interaction.response.send_message("❌ Error: NSFW content in non-NSFW channel.", ephemeral=False)
-        fixed = link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
-        await interaction.response.send_message(content=fixed, ephemeral=False)
-    except:
-        await interaction.response.send_message("❌ Error: Invalid Reddit link.", ephemeral=False)
-
 # --- AUTO LOOP ---
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
-        for name, (url, ch_id) in list(feeds.items()):
+        # Sözlüğün o anki kopyası üzerinde dön
+        current_list = list(feeds.items())
+        for name, (url, ch_id) in current_list:
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, timeout=10) as resp:
@@ -165,7 +157,7 @@ async def check_feeds():
             await asyncio.sleep(2)
         await asyncio.sleep(120)
 
-# --- WEB & MAIN ---
+# --- WEB SERVER ---
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/", lambda r: web.Response(text="Bot Alive"))
