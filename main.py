@@ -48,6 +48,7 @@ class MyBot(discord.Client):
         print(f'------\nLogged in as {self.user}\n------')
 
 client = MyBot()
+nsfw_cache = {}
 
 # --- SMART NSFW CHECKER ---
 async def check_subreddit_nsfw(sub_name):
@@ -69,17 +70,14 @@ async def check_subreddit_nsfw(sub_name):
         return True
     except: return True
 
-nsfw_cache = {}
-
-# --- COMMANDS (ENGLISH MESSAGES & PUBLIC) ---
+# --- COMMANDS (ALL ENGLISH & PUBLIC) ---
 
 @client.tree.command(name="add_feed", description="Add a new subreddit feed")
 @app_commands.default_permissions(administrator=True)
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
-    # ephemeral=False yapıldı, artık mesajı herkes görecek
     await interaction.response.defer(ephemeral=False)
-
-    current_feeds = load_data(FEEDS_FILE)
+    
+    current_feeds = load_data(FEEDS_FILE) # Fresh read
     sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
 
     if sub_clean in current_feeds:
@@ -97,15 +95,16 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, channel: di
 @client.tree.command(name="remove_feed", description="Remove a subreddit feed")
 @app_commands.default_permissions(administrator=True)
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
-    current_feeds = load_data(FEEDS_FILE)
+    current_feeds = load_data(FEEDS_FILE) # Fresh read to avoid "Not Found" error
     sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
-
+    
     if sub_clean in current_feeds:
         del current_feeds[sub_clean]
         save_data(FEEDS_FILE, current_feeds)
         await interaction.response.send_message(f"🗑️ Removed: r/{sub_clean} feed has been deleted.", ephemeral=False)
     else:
-        await interaction.response.send_message("❌ Error: Subreddit not found in the list.", ephemeral=False)
+        # DÜZELTİLDİ: Artık İngilizce
+        await interaction.response.send_message(f"❌ Error: Subreddit 'r/{sub_clean}' not found in the list.", ephemeral=False)
 
 @client.tree.command(name="send", description="Convert Reddit link to rxddit (NSFW Protected)")
 async def send(interaction: discord.Interaction, link: str):
@@ -124,7 +123,7 @@ async def feed_list(interaction: discord.Interaction):
     current_feeds = load_data(FEEDS_FILE)
     if not current_feeds: 
         return await interaction.response.send_message("📋 The feed list is currently empty.", ephemeral=False)
-
+    
     msg = "\n".join([f"• **r/{k}** -> <#{v[1]}>" for k, v in current_feeds.items()])
     await interaction.response.send_message(f"📋 **Active Feeds:**\n{msg}", ephemeral=False)
 
@@ -132,7 +131,7 @@ async def feed_list(interaction: discord.Interaction):
 async def check_feeds():
     await client.wait_until_ready()
     lp_cache = load_data(LAST_POSTS_FILE)
-
+    
     while not client.is_closed():
         current_feeds = load_data(FEEDS_FILE)
         for name, (url, ch_id) in list(current_feeds.items()):
@@ -149,7 +148,6 @@ async def check_feeds():
                                     save_data(LAST_POSTS_FILE, lp_cache)
                                     chan = client.get_channel(ch_id)
                                     if chan and isinstance(chan, discord.abc.Messageable):
-                                        # Basic double-check for NSFW in auto-feed
                                         if "over_18" in str(f.entries[0]) and not getattr(chan, 'nsfw', False):
                                             continue
                                         await chan.send(content=link.replace("reddit.com", "rxddit.com").replace("www.", ""))
@@ -157,27 +155,22 @@ async def check_feeds():
             await asyncio.sleep(2)
         await asyncio.sleep(120)
 
-# --- WEB SERVER (BETTERSTACK) ---
+# --- WEB SERVER ---
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/", lambda r: web.Response(text="Bot Alive"))
     runner = web.AppRunner(app)
     await runner.setup()
-    try:
-        await web.TCPSite(runner, "0.0.0.0", 8080).start()
-        print("Web server active on port 8080")
+    try: await web.TCPSite(runner, "0.0.0.0", 8080).start()
     except: pass
 
 async def main():
     await start_web_server()
-    # Token'ın gerçekten var olduğundan emin oluyoruz
     if not TOKEN:
         print("CRITICAL ERROR: TOKEN not found in Secrets!")
         return
-
     async with client:
         client.loop.create_task(check_feeds())
-        # Burada TOKEN'ın str olduğu kesinleştiği için hata kaybolur
         await client.start(TOKEN)
 
 if __name__ == "__main__":
