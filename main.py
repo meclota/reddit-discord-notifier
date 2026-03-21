@@ -1,5 +1,5 @@
 import discord
-from discord import app_commands
+from discord import app_commands, TextChannel
 import asyncio
 import os
 import json
@@ -13,10 +13,8 @@ lock = asyncio.Lock()
 
 # --- DB fonksiyonları ---
 def get_data():
-    # DB’de yoksa oluştur
     if "reddit_notifier_db" not in db:
         db["reddit_notifier_db"] = json.dumps({"feeds": {}, "last_posts": {}})
-    # JSON yükle
     try:
         data = json.loads(db["reddit_notifier_db"])
         if not isinstance(data.get("feeds"), dict):
@@ -79,9 +77,9 @@ async def add_feed(interaction: discord.Interaction, subreddit: str, channel: di
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
     data = get_data()
 
-    # NSFW kontrol
+    # NSFW kontrol (sadece TextChannel için)
     is_nsfw = await check_subreddit_nsfw(sub_clean)
-    if is_nsfw and not channel.is_nsfw():
+    if is_nsfw and (not isinstance(channel, TextChannel) or not channel.is_nsfw()):
         return await interaction.response.send_message(
             f"❌ Cannot add r/{sub_clean}: NSFW subreddit cannot be added to a non-NSFW channel.", ephemeral=True
         )
@@ -132,7 +130,7 @@ async def feed_list(interaction: discord.Interaction):
 @app_commands.default_permissions(administrator=True)
 async def send(interaction: discord.Interaction, reddit_link: str):
     chan = interaction.channel
-    if not isinstance(chan, discord.abc.Messageable):
+    if not isinstance(chan, TextChannel):
         return await interaction.response.send_message("❌ Cannot send to this channel.", ephemeral=True)
 
     # Subreddit adını al
@@ -174,7 +172,7 @@ async def check_feeds():
                                         fresh_data["last_posts"][name] = entry_id
                                         save_data(fresh_data)
                                         chan = client.get_channel(ch_id)
-                                        if isinstance(chan, discord.abc.Messageable):
+                                        if isinstance(chan, TextChannel):
                                             print(f"✅ Sent r/{name}")
                                             await chan.send(content=entry.link.replace("reddit.com", "rxddit.com"))
                                         await asyncio.sleep(1)
