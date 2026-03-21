@@ -84,7 +84,9 @@ async def feed_list(interaction: discord.Interaction):
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
+        # Her döngüde buluttan en taze veriyi çek
         current_data = get_data()
+        
         for name, (url, ch_id) in list(current_data["feeds"].items()):
             try:
                 headers = {'User-Agent': 'Mozilla/5.0 RedditNotifier/1.0'}
@@ -93,15 +95,27 @@ async def check_feeds():
                         if resp.status == 200:
                             f = feedparser.parse(await resp.read())
                             if f.entries:
-                                link = f.entries[0].link.split('?')[0].rstrip('/')
-                                if current_data["last_posts"].get(name) != link:
-                                    current_data["last_posts"][name] = link
+                                # LINK NORMALİZASYONU: Parametreleri at, son / işaretini sil ve küçük harf yap
+                                raw_link = f.entries[0].link.split('?')[0].rstrip('/').lower()
+                                
+                                # Daha önce kaydedilen linki kontrol et
+                                last_link = current_data["last_posts"].get(name)
+                                
+                                if last_link != raw_link:
+                                    # Yeni post bulundu! Önce hafızayı ve bulutu güncelle
+                                    current_data["last_posts"][name] = raw_link
                                     save_data(current_data)
+                                    
                                     chan = client.get_channel(ch_id)
                                     if isinstance(chan, discord.abc.Messageable):
-                                        await chan.send(content=link.replace("reddit.com", "rxddit.com"))
-            except: pass
+                                        # Paylaşırken rxddit kullan (Video/Görsel önizlemesi için)
+                                        print(f"✅ New post sent for r/{name}")
+                                        await chan.send(content=raw_link.replace("reddit.com", "rxddit.com"))
+            except Exception as e:
+                print(f"⚠️ Error checking r/{name}: {e}")
             await asyncio.sleep(5)
+        
+        # Subreddit listesi bittikten sonra 3 dakika bekle
         await asyncio.sleep(180)
 
 async def main():
