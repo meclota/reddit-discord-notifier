@@ -127,7 +127,7 @@ async def send(interaction: discord.Interaction, link: str):
         # Alt yapıdaki NSFW kontrolü
         sub_name = link.split("/r/")[1].split("/")[0].lower()
         is_link_nsfw = await check_subreddit_nsfw(sub_name)
-        
+
         if is_link_nsfw and not getattr(interaction.channel, 'nsfw', False):
             return await interaction.response.send_message("❌ NSFW içerik bu kanalda paylaşılamaz.", ephemeral=True)
 
