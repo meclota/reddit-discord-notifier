@@ -1,5 +1,3 @@
-#testing
-
 import discord
 from discord import app_commands
 import asyncio
@@ -9,13 +7,38 @@ import os
 import aiohttp
 import time
 from aiohttp import web
-from replit import db  # Replit'in kendi veritabanı kütüphanesi
+from replit import db
 
-# --- ENV VARIABLES ---
+# --- ENV & GLOBALS ---
 TOKEN = os.environ.get("TOKEN")
-
-# Global variables for fast access (synced with DB)
+feeds = {}
+last_posts = {}
 nsfw_cache = {}
+
+# --- DATABASE SYNC ---
+def sync_from_db():
+    global feeds, last_posts
+    try:
+        # Replit DB'den verileri çekiyoruz
+        feeds_raw = db.get("feeds", "{}")
+        lp_raw = db.get("last_posts", "{}")
+
+        # Veri string ise parse et, değilse direkt sözlüğe çevir
+        feeds.update(json.loads(feeds_raw) if isinstance(feeds_raw, str) else dict(feeds_raw))
+        last_posts.update(json.loads(lp_raw) if isinstance(lp_raw, str) else dict(lp_raw))
+        print("✅ Data synced from Replit DB.")
+    except Exception as e:
+        print(f"⚠️ DB Sync Error: {e}")
+
+def save_to_db():
+    try:
+        db["feeds"] = json.dumps(feeds)
+        db["last_posts"] = json.dumps(last_posts)
+    except Exception as e:
+        print(f"❌ DB Save Error: {e}")
+
+# Bot başlamadan verileri hafızaya al
+sync_from_db()
 
 class MyBot(discord.Client):
     def __init__(self):
@@ -28,30 +51,17 @@ class MyBot(discord.Client):
         await self.tree.sync()
 
     async def on_ready(self):
-        # Database initialize (if keys don't exist)
-        if "feeds" not in db:
-            db["feeds"] = "{}"
-        if "last_posts" not in db:
-            db["last_posts"] = "{}"
-        print(f'------\nLogged in as {self.user}\nDatabase Ready\n------')
+        print(f'------\nLogged in as {self.user}\n------')
 
 client = MyBot()
 
 # --- HELPERS ---
-def get_db_dict(key):
-    try:
-        return json.loads(db[key])
-    except:
-        return {}
-
-def set_db_dict(key, data):
-    db[key] = json.dumps(data)
-
 async def check_subreddit_nsfw(sub_name):
     curr = time.time()
     if sub_name in nsfw_cache:
         val, ts = nsfw_cache[sub_name]
         if curr - ts < 86400: return val
+    
     url = f"https://www.reddit.com/r/{sub_name}/about.json"
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
@@ -71,65 +81,55 @@ async def check_subreddit_nsfw(sub_name):
 @app_commands.default_permissions(administrator=True)
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
     await interaction.response.defer(ephemeral=False)
-    
-    feeds = get_db_dict("feeds")
     sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
 
     if sub_clean in feeds:
         return await interaction.followup.send(f"❌ Error: r/{sub_clean} is already in the list.")
 
-    is_sub_nsfw = await check_subreddit_nsfw(sub_clean)
-    if is_sub_nsfw and not getattr(channel, 'nsfw', False):
-        return await interaction.followup.send(f"❌ Error: r/{sub_clean} is NSFW, but this channel is not age-restricted.")
+    is_nsfw = await check_subreddit_nsfw(sub_clean)
+    if is_nsfw and not getattr(channel, 'nsfw', False):
+        return await interaction.followup.send(f"❌ Error: r/{sub_clean} is NSFW, but this channel is not.")
 
     feeds[sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
-    set_db_dict("feeds", feeds)
-
-    await interaction.followup.send(f"✅ Success: r/{sub_clean} has been linked to {channel.mention}.")
+    save_to_db()
+    await interaction.followup.send(f"✅ Success: r/{sub_clean} added to {channel.mention}.")
 
 @client.tree.command(name="remove_feed", description="Remove a subreddit feed")
 @app_commands.default_permissions(administrator=True)
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
-    feeds = get_db_dict("feeds")
-    lp = get_db_dict("last_posts")
     sub_clean = subreddit.lower().replace("r/", "").replace(" ", "").strip()
-    
     if sub_clean in feeds:
         del feeds[sub_clean]
-        if sub_clean in lp: del lp[sub_clean]
-        set_db_dict("feeds", feeds)
-        set_db_dict("last_posts", lp)
-        await interaction.response.send_message(f"🗑️ Removed: r/{sub_clean} feed has been deleted.", ephemeral=False)
+        if sub_clean in last_posts: del last_posts[sub_clean]
+        save_to_db()
+        await interaction.response.send_message(f"🗑️ Removed: r/{sub_clean}", ephemeral=False)
     else:
-        await interaction.response.send_message(f"❌ Error: Subreddit 'r/{sub_clean}' not found in the list.", ephemeral=False)
+        await interaction.response.send_message(f"❌ Error: r/{sub_clean} not found.", ephemeral=False)
 
-@client.tree.command(name="feed_list", description="Show all active subreddit feeds")
+@client.tree.command(name="feed_list", description="Show all active feeds")
 async def feed_list(interaction: discord.Interaction):
-    feeds = get_db_dict("feeds")
-    if not feeds: 
-        return await interaction.response.send_message("📋 The feed list is currently empty.", ephemeral=False)
-    
+    if not feeds:
+        return await interaction.response.send_message("📋 The list is empty.", ephemeral=False)
     msg = "\n".join([f"• **r/{k}** -> <#{v[1]}>" for k, v in feeds.items()])
     await interaction.response.send_message(f"📋 **Active Feeds:**\n{msg}", ephemeral=False)
 
-@client.tree.command(name="send", description="Convert link to rxddit")
+@client.tree.command(name="send", description="Convert link to rxddit (NSFW Checked)")
 async def send(interaction: discord.Interaction, link: str):
     try:
         sub_name = link.split("/r/")[1].split("/")[0].lower()
-        if await check_subreddit_nsfw(sub_name) and not getattr(interaction.channel, 'nsfw', False):
-            return await interaction.response.send_message("❌ Error: NSFW content in non-NSFW channel.", ephemeral=False)
+        is_nsfw = await check_subreddit_nsfw(sub_name)
+        if is_nsfw and not getattr(interaction.channel, 'nsfw', False):
+            return await interaction.response.send_message("❌ Error: NSFW link in non-NSFW channel.", ephemeral=False)
+        
         fixed = link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
         await interaction.response.send_message(content=fixed, ephemeral=False)
     except:
         await interaction.response.send_message("❌ Error: Invalid link.", ephemeral=False)
 
-# --- AUTO FEED LOOP ---
+# --- LOOP ---
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
-        feeds = get_db_dict("feeds")
-        lp = get_db_dict("last_posts")
-        
         for name, (url, ch_id) in list(feeds.items()):
             try:
                 async with aiohttp.ClientSession() as session:
@@ -139,12 +139,13 @@ async def check_feeds():
                             f = feedparser.parse(content)
                             if f and f.entries:
                                 link = f.entries[0].link.split('?')[0].rstrip('/')
-                                if lp.get(name) != link:
-                                    lp[name] = link
-                                    set_db_dict("last_posts", lp) # Save update to DB
+                                if last_posts.get(name) != link:
+                                    last_posts[name] = link
+                                    save_to_db()
                                     
                                     chan = client.get_channel(ch_id)
-                                    if chan:
+                                    # Tip hatasını gideren kısım: kanalın mesaj gönderilebilir olduğunu doğrula
+                                    if isinstance(chan, discord.abc.Messageable):
                                         if "over_18" in str(f.entries[0]) and not getattr(chan, 'nsfw', False):
                                             continue
                                         await chan.send(content=link.replace("reddit.com", "rxddit.com").replace("www.", ""))
@@ -152,7 +153,7 @@ async def check_feeds():
             await asyncio.sleep(2)
         await asyncio.sleep(120)
 
-# --- WEB SERVER ---
+# --- WEB & MAIN ---
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/", lambda r: web.Response(text="Bot Alive"))
@@ -163,7 +164,9 @@ async def start_web_server():
 
 async def main():
     await start_web_server()
-    if not TOKEN: return
+    if not TOKEN:
+        print("CRITICAL: TOKEN NOT FOUND")
+        return
     async with client:
         client.loop.create_task(check_feeds())
         await client.start(TOKEN)
