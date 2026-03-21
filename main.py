@@ -6,22 +6,23 @@ import json
 import feedparser
 import aiohttp
 from aiohttp import web
+from replit import db  # Veriyi bulutta saklayan kahraman
 
+# --- AYARLAR ---
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
-DB_FILE = "feeds.json"
 
-def load_data():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"feeds": {}, "last_posts": {}}
+# --- VERİ YÖNETİCİSİ (JSON YOK, BULUT VAR) ---
+def get_data():
+    """Veriyi Replit DB'den güvenli bir şekilde çeker."""
+    if "reddit_notifier_db" not in db:
+        db["reddit_notifier_db"] = json.dumps({"feeds": {}, "last_posts": {}})
+    return json.loads(db["reddit_notifier_db"])
 
-def save_data(data_to_save):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data_to_save, f, indent=4)
+def save_data(new_data):
+    """Veriyi Replit DB'ye mühürler."""
+    db["reddit_notifier_db"] = json.dumps(new_data)
 
-data = load_data()
-
+# --- BOT SINIFI ---
 class MyBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -36,39 +37,52 @@ class MyBot(discord.Client):
 
 client = MyBot()
 
+# --- KOMUTLAR ---
+
 @client.tree.command(name="add_feed", description="Yeni subreddit ekle")
 @app_commands.default_permissions(administrator=True)
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
-    if sub_clean in data["feeds"]:
+    current_data = get_data()
+
+    if sub_clean in current_data["feeds"]:
         return await interaction.response.send_message(f"❌ r/{sub_clean} zaten listede.")
-    data["feeds"][sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
-    save_data(data)
-    await interaction.response.send_message(f"✅ Başarılı: r/{sub_clean} eklendi.")
+
+    current_data["feeds"][sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
+    save_data(current_data)
+    await interaction.response.send_message(f"✅ Başarılı: r/{sub_clean} buluta eklendi.")
 
 @client.tree.command(name="remove_feed", description="Subreddit sil")
 @app_commands.default_permissions(administrator=True)
 async def remove_feed(interaction: discord.Interaction, subreddit: str):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
-    if sub_clean in data["feeds"]:
-        del data["feeds"][sub_clean]
-        data["last_posts"].pop(sub_clean, None)
-        save_data(data)
+    current_data = get_data()
+
+    if sub_clean in current_data["feeds"]:
+        del current_data["feeds"][sub_clean]
+        current_data["last_posts"].pop(sub_clean, None)
+        save_data(current_data)
         await interaction.response.send_message(f"🗑️ Silindi: r/{sub_clean}")
     else:
         await interaction.response.send_message(f"❌ Hata: r/{sub_clean} bulunamadı.")
 
 @client.tree.command(name="feed_list", description="Listeyi göster")
 async def feed_list(interaction: discord.Interaction):
-    if not data["feeds"]:
+    current_data = get_data()
+    if not current_data["feeds"]:
         return await interaction.response.send_message("📋 Liste şu an boş.")
-    items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in data["feeds"].items()]
+    
+    items = [f"• **r/{k}** -> <#{v[1]}>" for k, v in current_data["feeds"].items()]
     await interaction.response.send_message(f"📋 **Aktif Listeler:**\n" + "\n".join(items))
 
+# --- REDDIT TAKİP DÖNGÜSÜ ---
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
-        for name, (url, ch_id) in list(data["feeds"].items()):
+        # Her döngüde buluttan taze veriyi çek
+        current_data = get_data()
+        
+        for name, (url, ch_id) in list(current_data["feeds"].items()):
             try:
                 headers = {'User-Agent': 'Mozilla/5.0 RedditNotifier/1.0'}
                 async with aiohttp.ClientSession(headers=headers) as session:
@@ -77,28 +91,37 @@ async def check_feeds():
                             f = feedparser.parse(await resp.read())
                             if f.entries:
                                 link = f.entries[0].link.split('?')[0].rstrip('/')
-                                if data["last_posts"].get(name) != link:
-                                    data["last_posts"][name] = link
-                                    save_data(data)
+                                
+                                # Yeni post mu?
+                                if current_data["last_posts"].get(name) != link:
+                                    current_data["last_posts"][name] = link
+                                    save_data(current_data) # Bulutu güncelle
+                                    
                                     chan = client.get_channel(ch_id)
-                                    # TİP KONTROLÜ BURADA:
                                     if isinstance(chan, discord.abc.Messageable):
                                         await chan.send(content=link.replace("reddit.com", "rxddit.com"))
-            except: pass
-            await asyncio.sleep(5)
-        await asyncio.sleep(120)
+            except Exception as e:
+                print(f"⚠️ {name} hatası: {e}")
+            await asyncio.sleep(5) # Reddit'i kızdırmayalım
+        
+        await asyncio.sleep(180)
 
+# --- ANA BAŞLATICI ---
 async def main():
+    # Uptime için web sunucusu
     app = web.Application()
-    app.router.add_get("/", lambda r: web.Response(text="Bot Online"))
+    app.router.add_get("/", lambda r: web.Response(text="Bot Aktif"))
     runner = web.AppRunner(app)
     await runner.setup()
     try: await web.TCPSite(runner, "0.0.0.0", 8080).start()
     except: pass
+
     if TOKEN:
         async with client:
             client.loop.create_task(check_feeds())
             await client.start(TOKEN)
+    else:
+        print("❌ TOKEN BULUNAMADI!")
 
 if __name__ == "__main__":
     asyncio.run(main())
