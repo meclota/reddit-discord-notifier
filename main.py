@@ -84,39 +84,46 @@ async def feed_list(interaction: discord.Interaction):
 async def check_feeds():
     await client.wait_until_ready()
     while not client.is_closed():
-        # Her döngüde buluttan en taze veriyi çek
-        current_data = get_data()
-        
-        for name, (url, ch_id) in list(current_data["feeds"].items()):
+        # Her döngü başında güncel listeyi çek
+        current_db = get_data()
+        feeds = current_db.get("feeds", {})
+
+        for name, (url, ch_id) in list(feeds.items()):
             try:
                 headers = {'User-Agent': 'Mozilla/5.0 RedditNotifier/1.0'}
                 async with aiohttp.ClientSession(headers=headers) as session:
                     async with session.get(url, timeout=15) as resp:
                         if resp.status == 200:
-                            f = feedparser.parse(await resp.read())
+                            content = await resp.read()
+                            f = feedparser.parse(content)
+                            
                             if f.entries:
-                                # LINK NORMALİZASYONU: Parametreleri at, son / işaretini sil ve küçük harf yap
+                                # LİNK TEMİZLİĞİ: Küçük harf yap, parametreleri at, son slash'ı sil
                                 raw_link = f.entries[0].link.split('?')[0].rstrip('/').lower()
                                 
-                                # Daha önce kaydedilen linki kontrol et
-                                last_link = current_data["last_posts"].get(name)
-                                
+                                # VERİTABANINDAN ANLIK KONTROL (Cache yerine direkt DB)
+                                fresh_db = get_data()
+                                last_link = fresh_db["last_posts"].get(name, "").lower()
+
                                 if last_link != raw_link:
-                                    # Yeni post bulundu! Önce hafızayı ve bulutu güncelle
-                                    current_data["last_posts"][name] = raw_link
-                                    save_data(current_data)
+                                    # ÖNEMLİ: Önce DB'yi güncelle ki mesaj gitmeden "gönderildi" sayılsın
+                                    fresh_db["last_posts"][name] = raw_link
+                                    save_data(fresh_db)
                                     
                                     chan = client.get_channel(ch_id)
                                     if isinstance(chan, discord.abc.Messageable):
-                                        # Paylaşırken rxddit kullan (Video/Görsel önizlemesi için)
-                                        print(f"✅ New post sent for r/{name}")
+                                        # Paylaş ve konsola yaz
+                                        print(f"✅ New post sent: r/{name} -> {raw_link}")
                                         await chan.send(content=raw_link.replace("reddit.com", "rxddit.com"))
+                                    
+                                    # DB'nin senkronize olması için kısa bir es
+                                    await asyncio.sleep(1)
             except Exception as e:
-                print(f"⚠️ Error checking r/{name}: {e}")
-            await asyncio.sleep(5)
-        
-        # Subreddit listesi bittikten sonra 3 dakika bekle
-        await asyncio.sleep(180)
+                print(f"⚠️ Loop Error for r/{name}: {e}")
+            
+            # Subredditler arası kısa bekleme (Replit DB hız sınırı için)
+            await asyncio.sleep(2)
+        await asyncio.sleep(60)
 
 async def main():
     app = web.Application()
