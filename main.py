@@ -84,43 +84,33 @@ async def feed_list(interaction: discord.Interaction):
 @client.tree.command(name="send", description="Send a specific Reddit post to the current Discord channel")
 @app_commands.default_permissions(administrator=True)
 async def send(interaction: discord.Interaction, reddit_link: str):
-    # 1. Hızlı doğrulama (Kanal ve Link)
-    chan = interaction.channel
-    link_lower = reddit_link.lower()
-    
-    # reddit veya rxddit ikisini de kabul et, ama içinde mutlaka /r/ geçsin
-    if "/r/" not in link_lower:
-        return await interaction.response.send_message("❌ Geçersiz link! Lütfen bir Reddit linki girin.", ephemeral=True)
+    # 1. Hızlı Link ve Kanal Kontrolü
+    if "/r/" not in reddit_link.lower():
+        return await interaction.response.send_message("❌ Geçersiz link! Subreddit içermeli.", ephemeral=True)
 
-    # Bot "düşünüyor..." moduna girsin
-    await interaction.response.defer(ephemeral=True)
-
+    # 2. NSFW Kontrolü (Hızlıca yapıp direkt cevap vereceğiz)
     try:
-        # 2. NSFW Kontrolü
-        # Linkten subreddit adını çek
         sub_name = reddit_link.split("/r/")[1].split("/")[0].lower()
         is_sub_nsfw = await check_subreddit_nsfw(sub_name)
-        is_chan_nsfw = getattr(chan, 'nsfw', False)
+        is_chan_nsfw = getattr(interaction.channel, 'nsfw', False)
 
         if is_sub_nsfw and not is_chan_nsfw:
-            return await interaction.followup.send("❌ Bu subreddit NSFW, ama bu kanal değil!", ephemeral=True)
+            return await interaction.response.send_message("❌ Bu subreddit NSFW, ama bu kanal değil!", ephemeral=True)
 
-        # 3. Linki Temizle (rxddit'e çevir ve parametreleri at)
-        # Zaten rxddit ise bozmaz, reddit ise çevirir
+        # 3. Linki Temizle ve Hazırla
         final_link = reddit_link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
         
-        # 4. Kanala Gönder ve İşlemi Kapat
-        await chan.send(content=f"{interaction.user.mention}: {final_link}")
+        # 4. Kanala Mesajı At
+        await interaction.channel.send(content=f"{interaction.user.mention}: {final_link}")
         
-        # "Düşünüyor" yazısını başarıyla kapatır
-        await interaction.followup.send("✅ Gönderildi.", ephemeral=True)
+        # 5. Discord'a "İşlem Tamam" De (Bu satır 'Düşünüyor' yazısını hemen siler)
+        await interaction.response.send_message("✅ Gönderildi.", ephemeral=True)
 
     except Exception as e:
-        # Bir hata olursa askıda kalmasın, hatayı fırlatsın
-        if interaction.status == discord.InteractionStatus.deferred:
-            await interaction.followup.send(f"❌ Hata oluştu: {str(e)}", ephemeral=True)
-        else:
-            print(f"Send Hatası: {e}")
+        # Hata olsa bile Discord'u yanıtsız bırakma
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"❌ Hata: {str(e)}", ephemeral=True)
+        print(f"Send Hatası: {e}")
 
 # --- Feed loop ---
 async def check_feeds():
