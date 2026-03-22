@@ -46,16 +46,43 @@ class MyBot(discord.Client):
 
 client = MyBot()
 
+# --- SMART NSFW CHECKER ---
+async def check_subreddit_nsfw(sub_name):
+    url = f"https://www.reddit.com/r/{sub_name}/about.json"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("data", {}).get("over_18", False)
+                return True 
+    except:
+        return True
+
 # --- Feed commands ---
 @client.tree.command(name="add_feed", description="Add a new subreddit")
 @app_commands.default_permissions(administrator=True)
 async def add_feed(interaction: discord.Interaction, subreddit: str, channel: discord.abc.GuildChannel):
     sub_clean = subreddit.lower().strip().replace("r/", "").replace("/", "")
     current_data = get_data()
+
     if sub_clean in current_data["feeds"]:
         return await interaction.response.send_message(f"❌ r/{sub_clean} is already in the list.")
+
+    # NSFW kontrol
+    is_sub_nsfw = await check_subreddit_nsfw(sub_clean)
+    is_channel_nsfw = getattr(channel, 'nsfw', False)
+
+    if is_sub_nsfw and not is_channel_nsfw:
+        return await interaction.response.send_message(
+            f"❌ r/{sub_clean} is NSFW but channel is not NSFW.",
+            ephemeral=True
+        )
+
     current_data["feeds"][sub_clean] = [f"https://www.reddit.com/r/{sub_clean}/new/.rss", channel.id]
     save_data(current_data)
+
     await interaction.response.send_message(f"✅ Success: r/{sub_clean} added.")
 
 @client.tree.command(name="remove_feed", description="Remove a subreddit")
@@ -85,9 +112,25 @@ async def feed_list(interaction: discord.Interaction):
 @app_commands.default_permissions(administrator=True)
 async def send(interaction: discord.Interaction, reddit_link: str):
     chan = interaction.channel
+
     if not isinstance(chan, discord.abc.Messageable):
         return await interaction.response.send_message(
-            "❌ Cannot send to this channel.", ephemeral=True)
+            "❌ Cannot send to this channel.", ephemeral=True
+        )
+
+    try:
+        sub_name = reddit_link.split("/r/")[1].split("/")[0].lower()
+        is_link_nsfw = await check_subreddit_nsfw(sub_name)
+        is_channel_nsfw = getattr(chan, 'nsfw', False)
+
+        if is_link_nsfw and not is_channel_nsfw:
+            return await interaction.response.send_message(
+                "❌ NSFW links not allowed in this channel.",
+                ephemeral=True
+            )
+    except:
+        pass
+
     cleaned_link = reddit_link.replace("reddit.com", "rxddit.com")
     await chan.send(content=cleaned_link)
 
@@ -116,6 +159,12 @@ async def check_feeds():
                                         save_data(fresh_db)
                                         chan = client.get_channel(ch_id)
                                         if isinstance(chan, discord.abc.Messageable):
+                                            is_chan_nsfw = getattr(chan, 'nsfw', False)
+                                            is_post_nsfw = "over_18" in str(entry)
+                                        
+                                            if is_post_nsfw and not is_chan_nsfw:
+                                                continue
+                                        
                                             print(f"✅ Sent: r/{name}")
                                             await chan.send(content=entry.link.replace("reddit.com", "rxddit.com"))
                                         await asyncio.sleep(1)
