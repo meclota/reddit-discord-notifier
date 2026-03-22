@@ -46,6 +46,8 @@ class MyBot(discord.Client):
             self.bg_task_started = True
             asyncio.create_task(check_feeds())
 
+client = MyBot()
+
 # --- SMART NSFW CHECKER ---
 async def check_subreddit_nsfw(sub_name):
     url = f"https://www.reddit.com/r/{sub_name}/about.json"
