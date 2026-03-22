@@ -97,40 +97,30 @@ async def feed_list(interaction: discord.Interaction):
 @client.tree.command(name="send", description="Convert link to rxddit (NSFW Protected)")
 @app_commands.default_permissions(administrator=True)
 async def send(interaction: discord.Interaction, link: str):
-    # 1. Temel Link Kontrolü (Hata vermemesi için rxddit'i de kabul eder)
+    # 1. Hızlı Link Kontrolü
     if "/r/" not in link.lower():
-        return await interaction.response.send_message("❌ Please provide a valid Reddit link.", ephemeral=True)
+        return await interaction.response.send_message("❌ Geçersiz Reddit linki!", ephemeral=True)
 
     try:
-        # 2. Subreddit Adını Çek (Eski mantığındaki gibi) [cite: 7]
+        # 2. Senin SMART NSFW CHECKER fonksiyonunu burada çağırıyoruz
         sub_name = link.split("/r/")[1].split("/")[0].lower()
-        
-        # 3. Akıllı NSFW Kontrolü 
-        is_link_nsfw = await check_subreddit_nsfw(sub_name)
+        is_link_nsfw = await check_subreddit_nsfw(sub_name) # <--- Senin fonksiyonun
         is_channel_nsfw = getattr(interaction.channel, 'nsfw', False)
         
-        # 4. NSFW Koruması [cite: 7]
+        # 3. NSFW Bariyeri: Eğer sub NSFW ama kanal değilse engelle
         if is_link_nsfw and not is_channel_nsfw:
             return await interaction.response.send_message("❌ NSFW links not allowed in this channel.", ephemeral=True)
             
-        # 5. Linki Temizle ve rxddit'e Çevir [cite: 7]
+        # 4. Linki Temizle ve Hazırla
         fixed = link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
         
-        # 6. Kanala Gönder ve Onayla
-        # Kanalın mesaj gönderilebilir (TextChannel vb.) olup olmadığını kontrol ediyoruz
-        if isinstance(interaction.channel, discord.abc.Messageable):
-            await interaction.channel.send(content=f"{fixed}")
-            
-            # Discord'un "Uygulama yanıt vermedi" hatası vermemesi için 
-            # görünmez bir cevap verip anında siliyoruz (Sessiz yöntem)
-            await interaction.response.send_message("...", ephemeral=True)
-            await interaction.delete_original_response()
-        else:
-            # Eğer kanal mesaj gönderilemez bir yerse (Kategori vb.) hata mesajı ver
-            await interaction.response.send_message("❌ Bu kanala mesaj gönderilemez!", ephemeral=True)
+        # 5. ÇÖZÜM: Tek Seferde ve Herkese Açık Gönder
+        # Hem kanala mesajı atar hem de Discord'a "tamam" der. 
+        # Böylece ne çiftleme yapar ne de "uygulama yanıt vermedi" hatası verir.
+        await interaction.response.send_message(content=f"{fixed}")
 
     except Exception as e:
-        # Hata durumunda Discord'u yanıtsız bırakmıyoruz
+        # Hata durumunda en azından sana gizli bir hata mesajı versin
         if not interaction.response.is_done():
             await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
 
