@@ -46,6 +46,19 @@ class MyBot(discord.Client):
 
 client = MyBot()
 
+# --- SMART NSFW CHECKER ---
+async def check_subreddit_nsfw(sub_name):
+    url = f"https://www.reddit.com/r/{sub_name}/about.json"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("data", {}).get("over_18", False)
+                return True 
+    except: return True
+
 # --- Feed commands ---
 @client.tree.command(name="add_feed", description="Add a new subreddit")
 @app_commands.default_permissions(administrator=True)
@@ -81,36 +94,39 @@ async def feed_list(interaction: discord.Interaction):
     await interaction.response.send_message(f"📋 **Feeds:**\n" + "\n".join(items))
 
 # --- /send command (komutu yazdığın kanala gönderir) ---
-@client.tree.command(name="send", description="Send a specific Reddit post to the current Discord channel")
+@client.tree.command(name="send", description="Convert link to rxddit (NSFW Protected)")
 @app_commands.default_permissions(administrator=True)
-async def send(interaction: discord.Interaction, reddit_link: str):
-    # 1. Hızlı Link ve Kanal Kontrolü
-    if "/r/" not in reddit_link.lower():
-        return await interaction.response.send_message("❌ Geçersiz link! Subreddit içermeli.", ephemeral=True)
+async def send(interaction: discord.Interaction, link: str):
+    # 1. Temel Link Kontrolü (Hata vermemesi için rxddit'i de kabul eder)
+    if "/r/" not in link.lower():
+        return await interaction.response.send_message("❌ Please provide a valid Reddit link.", ephemeral=True)
 
-    # 2. NSFW Kontrolü (Hızlıca yapıp direkt cevap vereceğiz)
     try:
-        sub_name = reddit_link.split("/r/")[1].split("/")[0].lower()
-        is_sub_nsfw = await check_subreddit_nsfw(sub_name)
-        is_chan_nsfw = getattr(interaction.channel, 'nsfw', False)
-
-        if is_sub_nsfw and not is_chan_nsfw:
-            return await interaction.response.send_message("❌ Bu subreddit NSFW, ama bu kanal değil!", ephemeral=True)
-
-        # 3. Linki Temizle ve Hazırla
-        final_link = reddit_link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
+        # 2. Subreddit Adını Çek (Eski mantığındaki gibi) [cite: 7]
+        sub_name = link.split("/r/")[1].split("/")[0].lower()
         
-        # 4. Kanala Mesajı At
-        await interaction.channel.send(content=f"{interaction.user.mention}: {final_link}")
+        # 3. Akıllı NSFW Kontrolü 
+        is_link_nsfw = await check_subreddit_nsfw(sub_name)
+        is_channel_nsfw = getattr(interaction.channel, 'nsfw', False)
         
-        # 5. Discord'a "İşlem Tamam" De (Bu satır 'Düşünüyor' yazısını hemen siler)
-        await interaction.response.send_message("✅ Gönderildi.", ephemeral=True)
+        # 4. NSFW Koruması [cite: 7]
+        if is_link_nsfw and not is_channel_nsfw:
+            return await interaction.response.send_message("❌ NSFW links not allowed in this channel.", ephemeral=True)
+            
+        # 5. Linki Temizle ve rxddit'e Çevir [cite: 7]
+        fixed = link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
+        
+        # 6. Kanala Gönder ve Onayla
+        # Önce kanala mesajı atıyoruz
+        await interaction.channel.send(content=f"{interaction.user.mention}: {fixed}")
+        
+        # Sonra "Thinking" kalmaması için anında cevap veriyoruz
+        await interaction.response.send_message("✅ Success!", ephemeral=True)
 
     except Exception as e:
-        # Hata olsa bile Discord'u yanıtsız bırakma
+        # Hata durumunda Discord'u yanıtsız bırakmıyoruz
         if not interaction.response.is_done():
-            await interaction.response.send_message(f"❌ Hata: {str(e)}", ephemeral=True)
-        print(f"Send Hatası: {e}")
+            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
 
 # --- Feed loop ---
 async def check_feeds():
