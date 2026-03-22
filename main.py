@@ -34,17 +34,17 @@ class MyBot(discord.Client):
         intents = discord.Intents.default()
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
-        self.bg_task = None
+        self.bg_task_started = False  # Döngü başladı mı kontrolü
 
     async def setup_hook(self):
         await self.tree.sync()
-        if self.bg_task is None:
-            self.bg_task = asyncio.create_task(check_feeds())
 
     async def on_ready(self):
         print(f'------\nBot Online: {self.user}\n------')
-
-client = MyBot()
+        # Döngüyü burada, eğer daha önce başlamadıysa başlatıyoruz
+        if not self.bg_task_started:
+            self.bg_task_started = True
+            asyncio.create_task(check_feeds())
 
 # --- SMART NSFW CHECKER ---
 async def check_subreddit_nsfw(sub_name):
