@@ -81,22 +81,40 @@ async def feed_list(interaction: discord.Interaction):
     await interaction.response.send_message(f"📋 **Feeds:**\n" + "\n".join(items))
 
 # --- /send command (komutu yazdığın kanala gönderir) ---
-@client.tree.command(name="send",description="Send a specific Reddit post to the current Discord channel")
+@client.tree.command(name="send", description="Send a specific Reddit post to the current Discord channel")
 @app_commands.default_permissions(administrator=True)
 async def send(interaction: discord.Interaction, reddit_link: str):
+    # 1. Kanal kontrolü
     chan = interaction.channel
-
     if not isinstance(chan, discord.abc.Messageable):
         return await interaction.response.send_message("❌ Cannot send to this channel.", ephemeral=True)
 
-    # FIXED LINK CHECK
-    if not any(domain in reddit_link for domain in ["reddit.com", "rxddit.com"]):
-        return await interaction.response.send_message("❌ Please provide a valid Reddit link.",ephemeral=True)
+    # 2. Geçerli link kontrolü
+    if "reddit.com/r/" not in reddit_link.lower():
+        return await interaction.response.send_message("❌ Please provide a valid Reddit link.", ephemeral=True)
 
     await interaction.response.defer(ephemeral=True)
 
-    cleaned_link = reddit_link.replace("reddit.com", "rxddit.com")
-    await chan.send(content=cleaned_link)
+    try:
+        # 3. NSFW Çapraz Kontrolü
+        sub_name = reddit_link.split("/r/")[1].split("/")[0].lower()
+        is_sub_nsfw = await check_subreddit_nsfw(sub_name)
+        is_chan_nsfw = getattr(chan, 'nsfw', False)
+
+        if is_sub_nsfw and not is_chan_nsfw:
+            return await interaction.followup.send("❌ Bu subreddit NSFW içeriyor ama bu kanal yaş kısıtlamalı değil!", ephemeral=True)
+
+        # 4. Linki temizle ve gönder
+        cleaned_link = reddit_link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
+        
+        # Sadece kanala gönderiyoruz
+        await chan.send(content=f"{interaction.user.mention}: {cleaned_link}")
+        
+        # Interaction'ı başarıyla sonlandır (Düşünüyor yazısını kaldırır)
+        await interaction.followup.send("✅ Link sent!", ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 # --- Feed loop ---
 async def check_feeds():
