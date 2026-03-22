@@ -81,31 +81,20 @@ async def feed_list(interaction: discord.Interaction):
     await interaction.response.send_message(f"📋 **Feeds:**\n" + "\n".join(items))
 
 # --- /send command (komutu yazdığın kanala gönderir) ---
-@client.tree.command(
-    name="send",
-    description="Send a specific Reddit post to the current Discord channel"
-)
+@client.tree.command(name="send",description="Send a specific Reddit post to the current Discord channel")
 @app_commands.default_permissions(administrator=True)
 async def send(interaction: discord.Interaction, reddit_link: str):
     chan = interaction.channel
 
-    # 1. kanal kontrol
     if not isinstance(chan, discord.abc.Messageable):
-        return await interaction.response.send_message(
-            "❌ Cannot send to this channel.", ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Cannot send to this channel.", ephemeral=True)
 
-    # 2. link kontrol (EN ÖNEMLİ FIX)
-    if "reddit.com/r/" not in reddit_link:
-        return await interaction.response.send_message(
-            "❌ Please provide a valid Reddit link.",
-            ephemeral=True
-        )
+    # FIXED LINK CHECK
+    if not any(domain in reddit_link for domain in ["reddit.com", "rxddit.com"]):
+        return await interaction.response.send_message("❌ Please provide a valid Reddit link.",ephemeral=True)
 
-    # 3. interaction cevap (double message fix)
     await interaction.response.defer(ephemeral=True)
 
-    # 4. gönder
     cleaned_link = reddit_link.replace("reddit.com", "rxddit.com")
     await chan.send(content=cleaned_link)
 
