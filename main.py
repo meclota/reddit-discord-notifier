@@ -117,14 +117,17 @@ async def send(interaction: discord.Interaction, link: str):
         fixed = link.replace("reddit.com", "rxddit.com").replace("www.", "").split('?')[0]
         
         # 6. Kanala Gönder ve Onayla
-        # Önce kanala mesajı atıyoruz
-        await interaction.channel.send(content=f"{fixed}")
-        
-# 6. SESSİZ YANIT VE HEMEN SİLME (Only you can see olayını bitirir)
-        # Önce gizli bir yanıt veriyoruz (hata almamak için şart)
-        await interaction.response.send_message("...", ephemeral=True)
-        # Sonra bu yanıtı anında siliyoruz
-        await interaction.delete_original_response()
+        # Kanalın mesaj gönderilebilir (TextChannel vb.) olup olmadığını kontrol ediyoruz
+        if isinstance(interaction.channel, discord.abc.Messageable):
+            await interaction.channel.send(content=f"{fixed}")
+            
+            # Discord'un "Uygulama yanıt vermedi" hatası vermemesi için 
+            # görünmez bir cevap verip anında siliyoruz (Sessiz yöntem)
+            await interaction.response.send_message("...", ephemeral=True)
+            await interaction.delete_original_response()
+        else:
+            # Eğer kanal mesaj gönderilemez bir yerse (Kategori vb.) hata mesajı ver
+            await interaction.response.send_message("❌ Bu kanala mesaj gönderilemez!", ephemeral=True)
 
     except Exception as e:
         # Hata durumunda Discord'u yanıtsız bırakmıyoruz
