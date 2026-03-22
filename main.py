@@ -88,15 +88,26 @@ async def feed_list(interaction: discord.Interaction):
 @app_commands.default_permissions(administrator=True)
 async def send(interaction: discord.Interaction, reddit_link: str):
     chan = interaction.channel
+
+    # 1. kanal kontrol
     if not isinstance(chan, discord.abc.Messageable):
         return await interaction.response.send_message(
             "❌ Cannot send to this channel.", ephemeral=True
         )
+
+    # 2. link kontrol (EN ÖNEMLİ FIX)
+    if "reddit.com/r/" not in reddit_link:
+        return await interaction.response.send_message(
+            "❌ Please provide a valid Reddit link.",
+            ephemeral=True
+        )
+
+    # 3. interaction cevap (double message fix)
+    await interaction.response.defer(ephemeral=True)
+
+    # 4. gönder
     cleaned_link = reddit_link.replace("reddit.com", "rxddit.com")
     await chan.send(content=cleaned_link)
-    await interaction.response.send_message(
-        f"✅ Link sent to this channel!", ephemeral=True
-    )
 
 # --- Feed loop ---
 async def check_feeds():
