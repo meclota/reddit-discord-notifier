@@ -119,6 +119,11 @@ async def send(interaction: discord.Interaction, link: str):
         # Böylece ne çiftleme yapar ne de "uygulama yanıt vermedi" hatası verir.
         await interaction.response.send_message(fixed)
 
+        # 6. SESSİZ YANIT VE SİLME (Uygulama yanıt vermedi hatasını önler ve yazıyı kaldırır)
+        # Önce gizli bir yanıt veriyoruz
+        await interaction.response.send_message("...", ephemeral=True)
+        await interaction.delete_original_response()
+
     except Exception as e:
         # Hata durumunda en azından sana gizli bir hata mesajı versin
         if not interaction.response.is_done():
