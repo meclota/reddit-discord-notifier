@@ -117,7 +117,7 @@ async def send(interaction: discord.Interaction, link: str):
         # 5. ÇÖZÜM: Tek Seferde ve Herkese Açık Gönder
         # Hem kanala mesajı atar hem de Discord'a "tamam" der. 
         # Böylece ne çiftleme yapar ne de "uygulama yanıt vermedi" hatası verir.
-        await interaction.response.send_message(content=f"{fixed}")
+        await interaction.response.send_message(fixed)
 
     except Exception as e:
         # Hata durumunda en azından sana gizli bir hata mesajı versin
