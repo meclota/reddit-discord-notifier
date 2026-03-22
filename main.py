@@ -118,10 +118,10 @@ async def send(interaction: discord.Interaction, link: str):
         
         # 6. Kanala Gönder ve Onayla
         # Önce kanala mesajı atıyoruz
-        await interaction.channel.send(content=f"{interaction.user.mention}: {fixed}")
+        await interaction.channel.send(content=f"{fixed}")
         
         # Sonra "Thinking" kalmaması için anında cevap veriyoruz
-        await interaction.response.send_message("✅ Success!", ephemeral=True)
+        #await interaction.response.send_message("✅ Success!", ephemeral=True)
 
     except Exception as e:
         # Hata durumunda Discord'u yanıtsız bırakmıyoruz
