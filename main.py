@@ -120,8 +120,11 @@ async def send(interaction: discord.Interaction, link: str):
         # Önce kanala mesajı atıyoruz
         await interaction.channel.send(content=f"{fixed}")
         
-        # Sonra "Thinking" kalmaması için anında cevap veriyoruz
-        #await interaction.response.send_message("✅ Success!", ephemeral=True)
+# 6. SESSİZ YANIT VE HEMEN SİLME (Only you can see olayını bitirir)
+        # Önce gizli bir yanıt veriyoruz (hata almamak için şart)
+        await interaction.response.send_message("...", ephemeral=True)
+        # Sonra bu yanıtı anında siliyoruz
+        await interaction.delete_original_response()
 
     except Exception as e:
         # Hata durumunda Discord'u yanıtsız bırakmıyoruz
